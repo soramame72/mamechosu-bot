@@ -271,10 +271,42 @@ async def task_save_vc_rankings():
 # ──────────────────────────────────────────────
 
 # ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # on_ready
 # ──────────────────────────────────────────────
+JST = datetime.timezone(datetime.timedelta(hours=9))
+
+@tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=JST))
+async def akeome_loop():
+    data = db_read("akeome", guild_id="global")
+    if not isinstance(data, dict):
+        return
+    for guild_id_str, channel_id in data.items():
+        ch = bot.get_channel(channel_id)
+        if ch:
+            try:
+                await ch.send("あけおめ")
+            except:
+                pass
+
+@bot.tree.command(name="akeomeset", description="毎日0時(JST)にあけおめメッセージを送信するチャンネルを設定します")
+@app_commands.describe(channel="送信するチャンネル")
+async def cmd_akeomeset(interaction: discord.Interaction, channel: discord.TextChannel):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
+        return
+    data = db_read("akeome", guild_id="global")
+    if not isinstance(data, dict):
+        data = {}
+    data[str(interaction.guild_id)] = channel.id
+    db_write("akeome", data, guild_id="global")
+    await interaction.followup.send(f"毎日あけおめメッセージを {channel.mention} に送信するように設定しました。", ephemeral=True)
+
 @bot.event
 async def on_ready():
+    if not akeome_loop.is_running():
+        akeome_loop.start()
     print(f"ログイン: {bot.user} (ID: {bot.user.id})")
     try:
         h_cmd = bot.tree.get_command("h")
@@ -367,7 +399,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 @bot.tree.command(name="commands", description="コマンド一覧を表示します")
 async def cmd_list(interaction: discord.Interaction):
     await safe_defer(interaction, ephemeral=True)
-    cmds = bot.tree.get_commands()
+    cmds = [c for c in bot.tree.get_commands() if hasattr(c, "description") and c.description]
     desc = "\n".join(f"/{c.name} — {c.description}" for c in cmds)
     embed = discord.Embed(title="コマンド一覧", description=desc, color=0x5865F2)
     await interaction.followup.send(embed=embed)
@@ -622,7 +654,7 @@ HELP_TEXT = {
         "**入力したメッセージをBotがそのまま発言します。**\n"
         "使い方: `/echo message:[メッセージ]`\n"
         "Botに喋らせたい文章を入力すると、Botが代わりに発言します。\n"
-        "✔ 誰が使ったかはメッセージの最後に表示されます。"
+        "[注意] 誰が使ったかはメッセージの最後に表示されます。"
     ),
     "ranking": (
         "**サーバー内の活動ランキング（TOP 10）を表示します。**\n"
@@ -637,6 +669,56 @@ HELP_TEXT = {
         "- `VC滞在時間` → Bot導入からの累計（即座表示）\n"
         "※メッセージ系部門は履歴スキャンのため表示まで数秒かかることがあります。"
     ),
+    "spam": (
+        "**指定したメッセージを指定回数、一定間隔で連投します。**\n"
+        "使い方: `/spam message:[メッセージ] count:[回数(最大50)] interval:[間隔(0.5秒以上)]`\n"
+        "必要権限: メッセージ管理権限"
+    ),
+    "reaction": (
+        "**指定メッセージにObama絵文字25個をランダムでつけます。**\n"
+        "使い方: `/reaction message_id:[メッセージID]`\n"
+        "必要権限: メッセージ管理権限"
+    ),
+    "cp": (
+        "**サーバーの各種設定をボタンで操作できるパネルを開きます。**\n"
+        "使い方: `/cp`\n"
+        "必要権限: チャンネル管理権限"
+    ),
+    "cp_help": (
+        "**CP（コントロールパネル）のヘルプを表示します。**\n"
+        "使い方: `/cp_help`\n"
+        "必要権限: チャンネル管理権限"
+    ),
+    "rolepanel": (
+        "**ボタンでロールを付与/剥奪できるパネルを作成します。**\n"
+        "使い方: `/rolepanel roles:[ロールメンション] title:[タイトル] password:[パスワード(任意)]`\n"
+        "必要権限: ロール管理権限"
+    ),
+    "akeomeset": (
+        "**毎日0時にあけおめメッセージを自動送信するチャンネルを設定します。**\n"
+        "使い方: `/akeomeset channel:[チャンネル]`\n"
+        "必要権限: チャンネル管理権限"
+    ),
+    "impersonate": (
+        "**指定したユーザーになりすまして発言します。**\n"
+        "使い方: `/impersonate user:[ユーザー] message:[発言内容] attachment:[画像]`\n"
+        "※一定確率で正体がバレる煽りメッセージが表示されます。"
+    ),
+    "impersonatechance": (
+        "**なりすましがバレる確率を設定します。**\n"
+        "使い方: `/impersonatechance percent:[0〜100]`\n"
+        "必要権限: チャンネル管理権限"
+    ),
+    "impersonateset": (
+        "**なりすまし機能のON/OFFを設定します。**\n"
+        "使い方: `/impersonateset scope:[channel/server] state:[ON/OFF] channel:[対象]`\n"
+        "必要権限: チャンネル管理権限"
+    ),
+    "romaji": (
+        "**ローマ字翻訳機能のON/OFFを設定します。**\n"
+        "使い方: `/romaji scope:[channel/server] state:[ON/OFF] channel:[対象]`\n"
+        "必要権限: チャンネル管理権限"
+    )
 }
 
 @bot.tree.command(name="help", description="各コマンドの使い方を表示します")
@@ -664,28 +746,62 @@ async def cmd_echo(interaction: discord.Interaction, message: str):
     # 普通にレスポンスを返すことで「誰がコマンドを実行したか」がDiscord標準のUIで表示される
     await interaction.response.send_message(message)
 
+import uuid
+
+class SpamView(discord.ui.View):
+    def __init__(self, spams_dict, spam_id):
+        super().__init__(timeout=None)
+        self.spams_dict = spams_dict
+        self.spam_id = spam_id
+
+    @discord.ui.button(label="停止", style=discord.ButtonStyle.danger)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.spam_id in self.spams_dict:
+            self.spams_dict[self.spam_id] = False
+            await interaction.response.send_message("スパムを停止しました。", ephemeral=True)
+        else:
+            await interaction.response.send_message("すでに終了しているか、停止済みです。", ephemeral=True)
+        self.stop()
+
 @bot.tree.command(name="spam", description="指定したメッセージを指定回数、一定間隔で連投します")
-@app_commands.describe(message="連投するメッセージ", count="連投回数（最大20回）", interval="間隔（秒、1.0秒以上）")
+@app_commands.describe(message="連投するメッセージ", count="連投回数（最大50回）", interval="間隔（秒、0.5秒以上）")
 async def cmd_spam(interaction: discord.Interaction, message: str, count: int, interval: float = 1.0):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_messages:
         await interaction.followup.send("このコマンドを実行するには「メッセージの管理」権限が必要です。", ephemeral=True)
         return
     
-    if count < 1 or count > 20:
-        await interaction.followup.send("連投回数は 1回〜20回 の間で指定してください。", ephemeral=True)
+    if count < 1 or count > 50:
+        await interaction.followup.send("連投回数は 1回〜50回 の間で指定してください。", ephemeral=True)
         return
         
-    if interval < 1.0:
-        await interaction.followup.send("間隔は 1.0秒 以上に設定してください。（API制限回避のため）", ephemeral=True)
+    if interval < 0.5:
+        await interaction.followup.send("間隔は 0.5秒 以上に設定してください。（API制限回避のため）", ephemeral=True)
         return
         
-    await interaction.followup.send(f"スパムを開始します（{count}回, {interval}秒間隔）", ephemeral=True)
+    if len(message) > 2000:
+        await interaction.followup.send("メッセージは2000文字以内にしてください。", ephemeral=True)
+        return
+        
+    spam_id = str(uuid.uuid4())
+    if not hasattr(bot, "_active_spams"):
+        bot._active_spams = {}
+    bot._active_spams[spam_id] = True
+    
+    view = SpamView(bot._active_spams, spam_id)
+    await interaction.followup.send(f"スパムを開始します（{count}回, {interval}秒間隔）", view=view, ephemeral=True)
     
     for i in range(count):
-        await interaction.channel.send(message)
+        if not bot._active_spams.get(spam_id, False):
+            break
+        try:
+            await interaction.channel.send(message)
+        except Exception:
+            break
         if i < count - 1:
             await asyncio.sleep(interval)
+            
+    bot._active_spams.pop(spam_id, None)
 
 @bot.tree.command(name="ranking", description="サーバー内の活動ランキング（TOP 10）を表示します")
 @app_commands.describe(category="ランキングの部門")
@@ -701,7 +817,7 @@ async def cmd_spam(interaction: discord.Interaction, message: str, count: int, i
 async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_count"):
     await safe_defer(interaction)
     guild = interaction.guild
-    medals = ["🥇", "🥈", "🥉", "4位", "5位", "6位", "7位", "8位", "9位", "10位"]
+    medals = ["1位", "2位", "3位", "4位", "5位", "6位", "7位", "8位", "9位", "10位"]
 
     title_map = {
         "msg_count":       "メッセージ送信数",
@@ -731,7 +847,7 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
 
         sorted_data = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:10]
         if not sorted_data:
-            embed = discord.Embed(title=f"🏆 {title} ランキング", description="まだデータがありません。", color=0xFFD700)
+            embed = discord.Embed(title=f"【{title} ランキング】", description="まだデータがありません。", color=0xFFD700)
             await interaction.followup.send(embed=embed)
             return
 
@@ -744,7 +860,7 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
             time_str = f"{hours}時間{mins}分" if hours > 0 else f"{mins}分"
             desc += f"{medals[i]} **{name}** : {time_str}\n"
 
-        embed = discord.Embed(title=f"🏆 {title} ランキング (TOP 10)", description=desc, color=0xFFD700)
+        embed = discord.Embed(title=f"【{title} ランキング (TOP 10)】", description=desc, color=0xFFD700)
         embed.set_footer(text="※データはBot導入/再起動以降の累計です")
         await interaction.followup.send(embed=embed)
         return
@@ -792,7 +908,7 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
     sorted_data = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
     if not sorted_data:
-        embed = discord.Embed(title=f"🏆 {title} ランキング", description="まだデータがありません。", color=0xFFD700)
+        embed = discord.Embed(title=f"【{title} ランキング】", description="まだデータがありません。", color=0xFFD700)
         await interaction.channel.send(embed=embed)
         return
 
@@ -809,7 +925,7 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
         else:
             desc += f"{medals[i]} **{name}** : {val} 回\n"
 
-    embed = discord.Embed(title=f"🏆 {title} ランキング (TOP 10)", description=desc, color=0xFFD700)
+    embed = discord.Embed(title=f"【{title} ランキング (TOP 10)】", description=desc, color=0xFFD700)
     embed.set_footer(text="※直近30日間（各チャンネル最大1000件まで）の集計結果です")
     await interaction.channel.send(embed=embed)
 
@@ -1243,6 +1359,89 @@ class _BtnSetAIFrequency(discord.ui.Button):
     async def callback(self, i):
         await i.response.send_modal(AIFrequencyModal(self.gid))
 
+class ImpersonateChanceModal(discord.ui.Modal, title="なりすましバレ確率設定"):
+    percent = discord.ui.TextInput(
+        label="バレる確率 (0〜100)",
+        placeholder="例: 10",
+        default="10",
+        required=True
+    )
+    def __init__(self, gid):
+        super().__init__()
+        self.gid = gid
+        gd = db_read("impersonate", guild_id=gid)
+        self.percent.default = str(gd.get("expose_rate", 10))
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            val = int(self.percent.value)
+            if not 0 <= val <= 100:
+                raise ValueError
+        except:
+            await interaction.response.send_message("確率は 0〜100 の整数で指定してください。", ephemeral=True)
+            return
+        gd = db_read("impersonate", guild_id=self.gid)
+        gd["expose_rate"] = val
+        db_write("impersonate", gd, guild_id=self.gid)
+        await interaction.response.send_message(f"なりすましのバレ確率を {val}% に設定しました。", ephemeral=True)
+
+class _BtnSetImpersonateChance(discord.ui.Button):
+    def __init__(self, gid):
+        super().__init__(label="バレ確率変更", style=discord.ButtonStyle.secondary, row=3)
+        self.gid = gid
+    async def callback(self, i):
+        await i.response.send_modal(ImpersonateChanceModal(self.gid))
+
+class AkeomeSetModal(discord.ui.Modal, title="あけおめ設定"):
+    ch_id = discord.ui.TextInput(
+        label="チャンネルID",
+        placeholder="例: 123456789012345678",
+        required=True
+    )
+    def __init__(self, gid):
+        super().__init__()
+        self.gid = gid
+        data = db_read("akeome", guild_id="global")
+        if isinstance(data, dict) and str(gid) in data:
+            self.ch_id.default = str(data[str(gid)])
+            
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            cid = int(self.ch_id.value)
+        except:
+            await interaction.response.send_message("チャンネルIDは数字で入力してください。", ephemeral=True)
+            return
+            
+        data = db_read("akeome", guild_id="global")
+        if not isinstance(data, dict):
+            data = {}
+        data[str(self.gid)] = cid
+        db_write("akeome", data, guild_id="global")
+        await interaction.response.send_message(f"毎日あけおめメッセージを <#{cid}> に送信するように設定しました。", ephemeral=True)
+
+class _BtnSetAkeome(discord.ui.Button):
+    def __init__(self, gid):
+        super().__init__(label="あけおめch設定", style=discord.ButtonStyle.secondary, row=3)
+        self.gid = gid
+    async def callback(self, i):
+        await i.response.send_modal(AkeomeSetModal(self.gid))
+
+class _BtnCPHelp(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="CPヘルプ", style=discord.ButtonStyle.primary, row=3)
+    async def callback(self, i):
+        text = (
+            "**【コントロールパネル(CP)のヘルプ】**\n"
+            "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
+            "**主な機能**:\n"
+            "- **メッセージ・ワード管理**: 参加・退出メッセージ、禁止ワード、自動返信の設定\n"
+            "- **川柳 / えっち検出 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
+            "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
+            "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
+            "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
+            "※CPの操作には「チャンネルの管理」権限が必要です。"
+        )
+        await i.response.send_message(text, ephemeral=True)
+
 # ── CPView (6ページ構成) ──────────────────────
 class CPView(discord.ui.View):
     PAGE_TITLES = [
@@ -1282,6 +1481,7 @@ class CPView(discord.ui.View):
             self.add_item(_BtnPreviewWelcome(gid)); self.add_item(_BtnPreviewGoodbye(gid))
             self.add_item(_BtnAddWord(gid));        self.add_item(_BtnListWords(gid))
             self.add_item(_BtnAddAutoreply(gid));   self.add_item(_BtnListAutoreply(gid))
+            self.add_item(_BtnSetAkeome(gid));      self.add_item(_BtnCPHelp())
 
         elif p == 1:
             # ページ2: 川柳 ON/OFF (このch / 全体)
@@ -1334,6 +1534,7 @@ class CPView(discord.ui.View):
             for label, feat, scope, on, style, row in specs:
                 self.add_item(_ToggleButton(label=label, style=style, row=row,
                                             guild_id=gid, feature=feat, scope=scope, on=on))
+            self.add_item(_BtnSetImpersonateChance(gid))
 
         elif p == 5:
             # ページ6: サーバー情報・バックアップ / パネル作成
@@ -1367,9 +1568,32 @@ class CPView(discord.ui.View):
             description="ボタンで各機能を操作できます。",
             color=0xFEE75C)
 
+@bot.tree.command(name="cp_help", description="コントロールパネル(CP)のヘルプを表示します")
+@app_commands.default_permissions(manage_channels=True)
+async def cmd_cp_help(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("チャンネル管理権限が必要です。", ephemeral=True)
+        return
+    text = (
+        "**【コントロールパネル(CP)のヘルプ】**\n"
+        "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
+        "**主な機能**:\n"
+        "- **メッセージ・ワード管理**: 参加・退出メッセージ、禁止ワード、自動返信の設定\n"
+        "- **川柳 / えっち検出 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
+        "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
+        "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
+        "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
+        "※CPの操作には「チャンネルの管理」権限が必要です。"
+    )
+    await interaction.response.send_message(text, ephemeral=True)
+
 @bot.tree.command(name="cp", description="コントロールパネルを開きます")
+@app_commands.default_permissions(manage_channels=True)
 async def cmd_cp(interaction: discord.Interaction):
     await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.followup.send("コントロールパネルはチャンネル管理権限が必要です。", ephemeral=True)
+        return
     view  = CPView(interaction.guild_id, interaction.channel_id)
     embed = view._make_embed()
     await interaction.followup.send(embed=embed, view=view)
@@ -1667,7 +1891,7 @@ async def on_message(message: discord.Message):
             if GROQ_API_KEY:
                 translated = await _groq_translate_romaji(text)
                 if translated:
-                    await message.reply(f"🗣️翻訳: {translated}")
+                    await message.reply(f"[翻訳]: {translated}")
 
     # 自動返信 (クールダウン3秒・完全一致or部分一致を設定で選べる)
     if not _check_rate(f"autoreply:{message.channel.id}", cooldown_sec=3.0):
@@ -1675,7 +1899,6 @@ async def on_message(message: discord.Message):
     else:
         ar_data = db_read("autoreply", guild_id=message.guild.id)
         for trigger, rd in ar_data.get("replies", {}).items():
-            # 完全一致モード or 部分一致（デフォルト部分一致）
             match_mode = rd.get("match", "partial")
             matched = (message.content == trigger) if match_mode == "exact" else (trigger in message.content)
             if matched:
@@ -1709,7 +1932,6 @@ async def on_message(message: discord.Message):
     # AIチャット乱入処理
     active_chats = getattr(bot, "_active_chats", {})
     if message.channel.id in active_chats and not message.webhook_id:
-        # Historyに一般ユーザーの発言を追加
         session = active_chats[message.channel.id]
         session["history"].append({
             "name": message.author.display_name,
@@ -1766,14 +1988,10 @@ class AgreeModal(discord.ui.Modal, title="同意確認"):
 
 class MathModal(discord.ui.Modal, title="計算問題"):
     answer_input = discord.ui.TextInput(label="答えを入力", placeholder="数字")
-    def __init__(self, role_id, question, answer):
-        super().__init__(); self.role_id = role_id; self.answer = answer
-        self.answer_input.label = question
-    async def on_submit(self, interaction):
-        if self.answer_input.value.strip() == self.answer:
-            await _grant_role(interaction, self.role_id)
-        else:
-            await interaction.response.send_message("答えが違います。", ephemeral=True)
+
+
+
+
 
 class CodeModal(discord.ui.Modal, title="コード入力"):
     code_input = discord.ui.TextInput(label="コードを入力")
@@ -1830,8 +2048,110 @@ async def cmd_autoreply(interaction: discord.Interaction, action: str, trigger: 
         await interaction.followup.send(f"自動返信一覧:\n{text}", ephemeral=True)
 
 # ──────────────────────────────────────────────
-# 10. リアクション /reaction
+# 10. リアクション /reaction & Context Menus
 # ──────────────────────────────────────────────
+@bot.tree.context_menu(name="Make it a quote")
+async def context_quote(interaction: discord.Interaction, message: discord.Message):
+    await safe_defer(interaction)
+    
+    text = message.content or " "
+    author_name = message.author.display_name
+    avatar_url = message.author.display_avatar.url
+    
+    avatar_bytes = b""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(avatar_url) as resp:
+                if resp.status == 200:
+                    avatar_bytes = await resp.read()
+    except:
+        pass
+        
+    def _make_image():
+        img = Image.new("RGB", (1200, 630), "black")
+        if avatar_bytes:
+            try:
+                avatar = Image.open(BytesIO(avatar_bytes)).convert("L")
+                
+                # Aspect ratio crop
+                w, h = avatar.size
+                size = min(w, h)
+                avatar = avatar.crop(((w-size)//2, (h-size)//2, (w+size)//2, (h+size)//2))
+                avatar = avatar.resize((630, 630), Image.Resampling.LANCZOS)
+                
+                # Paste on left side
+                img.paste(avatar, (0, 0))
+                
+                # Dark gradient to fade out right side of avatar
+                gradient = Image.new("L", (630, 630))
+                g_draw = ImageDraw.Draw(gradient)
+                for x in range(630):
+                    alpha = int(255 * (1 - (x / 630) ** 2))
+                    g_draw.line([(x, 0), (x, 630)], fill=alpha)
+                
+                img.paste((0,0,0), (0,0), mask=Image.eval(gradient, lambda a: 255-a))
+            except:
+                pass
+
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
+        author_font = ImageFont.load_default()
+        for fp in ["/System/Library/Fonts/ヒラギノ明朝 ProN.ttc", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"]:
+            if os.path.exists(fp):
+                font = ImageFont.truetype(fp, 50)
+                author_font = ImageFont.truetype(fp, 40)
+                break
+                
+        # Wrapping text (roughly 15 chars per line for CJK)
+        wrapped_text = ""
+        line = ""
+        for char in text:
+            line += char
+            if len(line) >= 15 or char == "\n":
+                wrapped_text += line.strip() + "\n"
+                line = ""
+        if line:
+            wrapped_text += line.strip()
+            
+        quote_str = f"“{wrapped_text.strip()}”"
+        draw.multiline_text((680, 150), quote_str, fill="white", font=font, spacing=15)
+        draw.text((750, 480), f"― {author_name}", fill="gray", font=author_font)
+        
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return discord.File(buf, filename="quote.png")
+        
+    try:
+        file = await asyncio.to_thread(_make_image)
+        await interaction.followup.send(file=file)
+    except Exception as e:
+        await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
+
+@bot.tree.context_menu(name="Obama")
+async def context_obama(interaction: discord.Interaction, message: discord.Message):
+    await safe_defer(interaction, ephemeral=True)
+    obama_guild = bot.get_guild(OBAMA_GUILD_ID)
+    if not obama_guild:
+        await interaction.followup.send("obama絵文字のサーバーにBotが参加していません。", ephemeral=True)
+        return
+    emojis = []
+    e = discord.utils.get(obama_guild.emojis, name="obama")
+    if e: emojis.append(e)
+    for i in range(1, 25):
+        e = discord.utils.get(obama_guild.emojis, name=f"obama{i}")
+        if e: emojis.append(e)
+    if not emojis:
+        await interaction.followup.send("obama絵文字が見つかりませんでした。", ephemeral=True)
+        return
+    random.shuffle(emojis)
+    try:
+        for em in emojis[:20]:
+            await message.add_reaction(em)
+        await interaction.followup.send("Obama絵文字でリアクションしました。", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"エラー: {e}", ephemeral=True)
+
 @bot.tree.command(name="reaction", description="指定メッセージIDにobama絵文字25個をランダムでつけます")
 @app_commands.describe(message_id="対象のメッセージID")
 async def cmd_reaction(interaction: discord.Interaction, message_id: str):
@@ -2040,6 +2360,170 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size=size)
 
 
+# ──────────────────────────────────────────────
+# 作文 /sakubun
+# ──────────────────────────────────────────────
+KINSOKU_CHARS = set("、。，．」』ぁぃぅぇぉっゃゅょァィゥェォッャュョ")
+COLS_PER_PAGE = 20
+
+async def _groq_generate_sakubun(theme: str, length: int) -> str:
+    if not GROQ_API_KEY: return ""
+    prompt = (
+        f"あなたは小学生です。\n"
+        f"テーマ「{theme}」について、{length}文字程度の作文を書いてください。\n\n"
+        "【絶対ルール】\n"
+        "1. タイトル、氏名、挨拶などは一切書かないでください。\n"
+        "2. 本文のみを純粋なテキストで出力してください。\n"
+        "3. 改行や段落分けを適度に行ってください。\n"
+        "4. 自然な日本語（小学生〜中学生らしい文体）で書いてください。"
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1500,
+                    "temperature": 0.6,
+                },
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+    except: pass
+    return ""
+
+def _split_into_cols(text: str, title: str, author: str, rows: int = 20) -> list[list[str]]:
+    # Title: indent 3
+    title_line = ["　"] * 3 + list(title)
+    
+    # Author: end at 1-2 chars from bottom. 
+    auth_chars = list(author)
+    space_count = max(0, rows - 2 - len(auth_chars))
+    author_line = ["　"] * space_count + auth_chars
+    
+    lines: list[list[str]] = [title_line, author_line]
+    
+    # Body
+    paragraphs = text.split("\n")
+    cur: list[str] = []
+    
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            lines.append([]) # empty line
+            continue
+            
+        # Indent if not a conversation
+        if not para.startswith("「"):
+            para = "　" + para
+            
+        i = 0
+        while i < len(para):
+            ch = para[i]
+            if para[i:i+2] == "。」":
+                ch = "。」"
+                i += 1
+            if len(cur) >= rows:
+                if ch in KINSOKU_CHARS or ch == "。」":
+                    cur.append(ch)
+                else:
+                    lines.append(cur)
+                    cur = [ch]
+            else:
+                cur.append(ch)
+            i += 1
+            
+    if cur:
+        lines.append(cur)
+    return lines
+
+def _render_page(cols: list[list[str]], page: int, total: int, title: str) -> discord.File:
+    ROWS = 20
+    CELL = 36
+    MARGIN = 55
+    actual = max(COLS_PER_PAGE, len(cols))
+    W = MARGIN * 2 + actual * CELL
+    H = MARGIN * 2 + ROWS * CELL + 60
+    img = Image.new("RGB", (W, H), "#fdfbf7")
+    draw = ImageDraw.Draw(img)
+    RED = "#b82c2c"
+
+    font = ImageFont.load_default()
+    small_font = font
+    for fp in ["/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
+               "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+               "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"]:
+        if os.path.exists(fp):
+            font = ImageFont.truetype(fp, int(CELL * 0.8))
+            small_font = ImageFont.truetype(fp, 16)
+            break
+
+    page_str = f"{title}  ({page}/{total}ページ)"
+    draw.text((MARGIN, 10), page_str, fill="#555555", font=small_font)
+
+    top = MARGIN + 50; bottom = H - MARGIN
+    left = MARGIN; right = W - MARGIN
+    draw.rectangle([left, top, right, bottom], outline=RED, width=2)
+    for i in range(1, actual):
+        x = left + i * CELL
+        draw.line([x, top, x, bottom], fill=RED, width=1)
+    for i in range(1, ROWS):
+        y = top + i * CELL
+        draw.line([left, y, right, y], fill=RED, width=1)
+
+    for dy in range(-1, 2):
+        ym = top + 10 * CELL + dy
+        draw.line([left, ym, right, ym], fill="#fdfbf7", width=1)
+
+    for ci, col_chars in enumerate(cols):
+        x = right - (ci + 1) * CELL
+        for ri, ch in enumerate(col_chars):
+            y = top + ri * CELL
+            if ch == "。」":
+                cx1, cy1 = x + CELL * 0.6, y - CELL * 0.1
+                cx2, cy2 = x + CELL * 0.1, y + CELL * 0.05
+                draw.text((cx1, cy1), "。", fill="#1a1a1a", font=font)
+                draw.text((cx2, cy2), "」", fill="#1a1a1a", font=font)
+                continue
+
+            cx, cy = x + CELL * 0.1, y + CELL * 0.05
+            if ch in ["、", "。", "，", "．"]:
+                cx, cy = x + CELL * 0.6, y - CELL * 0.1
+            elif ch in ["っ","ゃ","ゅ","ょ","ぁ","ぃ","ぅ","ぇ","ぉ","ッ","ャ","ュ","ョ","ァ","ィ","ゥ","ェ","ォ"]:
+                cx = x + CELL * 0.3
+            
+            draw.text((cx, cy), ch, fill="#1a1a1a", font=font)
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return discord.File(buf, filename=f"sakubun_p{page}.png")
+
+def build_sakubun_images(text: str, title: str, author: str) -> list[discord.File]:
+    all_cols = _split_into_cols(text, title, author)
+    pages_cols = [all_cols[i:i+COLS_PER_PAGE] for i in range(0, max(1, len(all_cols)), COLS_PER_PAGE)]
+    total = len(pages_cols)
+    return [_render_page(pc, p+1, total, title) for p, pc in enumerate(pages_cols)]
+
+@bot.tree.command(name="sakubun", description="指定したテーマと文字数でAIが作文を書き、原稿用紙の画像として出力します")
+@app_commands.describe(theme="作文のテーマ", length="文字数の目安（例: 400）", author="筆者名（省略可）")
+async def cmd_sakubun(interaction: discord.Interaction, theme: str, length: int = 400, author: str = "名無し"):
+    await safe_defer(interaction)
+    if length > 1600:
+        await interaction.followup.send("文字数は1600文字以内で指定してください。")
+        return
+    text = await _groq_generate_sakubun(theme, length)
+    if not text:
+        await interaction.followup.send("作文の生成に失敗しました。")
+        return
+    files = await asyncio.to_thread(build_sakubun_images, text, theme, author)
+    for chunk in [files[i:i+10] for i in range(0, len(files), 10)]:
+        await interaction.followup.send(files=chunk)
+
 def build_haiku_image(parts: list[str]) -> Image.Image:
     """
     縦書き・和紙風俳句カード。W=380 H=560 固定。
@@ -2119,20 +2603,18 @@ async def _groq_extract_haiku(text: str) -> list[str] | None:
     try:
         prompt = (
             "あなたは川柳・俳句の専門家です。\n"
-            "次の【元の文章】を見て、川柳・俳句として3フレーズに区切れるか判断してください。\n"
+            "次の【元の文章】から、川柳として厳密に5・7・5（17モーラ）になっている部分があれば、それを抽出してください。\n"
             f"【元の文章】: 「{text}」\n\n"
             "【絶対ルール】\n"
-            "- 出力する句1・句2・句3は【元の文章】に含まれる文字だけを使うこと\n"
-            "- 元の文章にない言葉を追加・変更・創作することは禁止\n"
-            "- 元の文章をそのまま3分割するだけでよい\n\n"
-            "【判断基準】\n"
-            "- 上の句(5モーラ) / 中の句(7モーラ) / 下の句(5モーラ)に厳密に区切れるか\n"
-            "- 字余り・字足らずは一切認めません。必ず5・7・5のリズムになっているか発音（モーラ）で確認してください\n"
-            "- 区切りは言葉の意味・リズム・息継ぎで自然に決める\n\n"
-            "川柳として厳密に5・7・5で区切れる場合のみ、以下の形式だけで答えてください（説明不要）:\n"
+            "- 抽出する句1・句2・句3は【元の文章】に連続して含まれる文字だけをそのまま使うこと。\n"
+            "- 元の文章にない言葉を追加・変更・創作することは絶対に禁止。\n"
+            "- 長い文章の一部だけが5-7-5になっている場合、その部分だけを抽出すること。\n"
+            "- 上の句(5モーラ) / 中の句(7モーラ) / 下の句(5モーラ)に厳格に区切れるものだけを対象とする。\n"
+            "- 字余り・字足らずは一切認めない。必ずピッタリ5・7・5のリズムになっているか発音（モーラ）で確認すること。\n\n"
+            "川柳として厳密に5・7・5の部分が見つかった場合のみ、以下の形式だけで答えてください（説明不要）:\n"
             "句1|句2|句3\n\n"
-            "例（5-7-5）: 元「古池や蛙飛び込む水の音」→ 古池や|蛙飛び込む|水の音\n\n"
-            "川柳のリズム（厳密な5-7-5）が感じられない文章、または字余り・字足らずの場合は「なし」とだけ答えてください。"
+            "例: 元「昨日食べたラーメン美味しかったけど古池や蛙飛び込む水の音でびっくりした」→ 古池や|蛙飛び込む|水の音\n\n"
+            "厳密な5-7-5が見つからない場合、または字余り・字足らずの場合は「なし」とだけ答えてください。"
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -3488,13 +3970,12 @@ async def _groq_check_atsumori(text: str) -> bool:
         prompt = (
             "あなたはテレビ朝日報道ステーションの熱盛コーナーの審査員です。"
             "次のメッセージが熱盛かどうか判定してください。\n\n"
-            "「はい」にする条件（いずれか一つ以上当てはまればOK):\n"
-            "- 「熱盛」「あつもり」「アツモリ」などの言葉が含まれる\n"
-            "- スポーツ・競技・ゲームでの劇的な好プレー・逆転・感動的な場面\n"
-            "- 日常の出来事でも「かっこいい」「感動」「やった！」「すごい！」など興奮や感動が強く会われる発言\n"
-            "- こだわりを持って興奮を伝えるなんらかの熱い内容\n\n"
-            "「いいえ」にする条件:\n"
-            "- 単なる質問、入退陣な内容、感情の起伏が全くない平凡な発言\n\n"
+            "「はい」にする条件（以下の条件を【両方】満たす場合のみ「はい」）:\n"
+            "1. 「熱盛」「あつもり」「アツモリ」「ATSUMORI」などのキーワードが含まれている\n"
+            "2. さらに、内容がスポーツ・ゲーム等の劇的な好プレー・逆転・感動的な場面、または非常に熱い情熱を感じさせるものである\n\n"
+            "「いいえ」にする条件（以下に一つでも当てはまるなら「いいえ」）:\n"
+            "- キーワードが含まれていても、単なる日常会話・質問・挨拶・事務連絡である\n"
+            "- 感情の起伏がない、または短すぎて状況がわからない\n\n"
             f"メッセージ: 「{text}」\n\n"
             "熱盛なら「はい」、そうでなければ「いいえ」とだけ答えてください。"
         )
@@ -3635,9 +4116,9 @@ async def cmd_romaji(interaction: discord.Interaction,
 # なりすまし (impersonate)
 # ──────────────────────────────────────────────
 @bot.tree.command(name="impersonate", description="指定したユーザーになりすまして発言します")
-@app_commands.describe(user="なりすますユーザー", message="発言するメッセージ")
+@app_commands.describe(user="なりすますユーザー", message="発言するメッセージ", attachment="添付する画像等(省略可)")
 @app_commands.rename(user="ユーザー")
-async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, message: str):
+async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, message: str, attachment: discord.Attachment = None):
     await safe_defer(interaction, ephemeral=True)
 
     gd = db_read("impersonate", guild_id=interaction.guild_id)
@@ -3651,26 +4132,42 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
         name = user.display_name
 
         # Webhookを使ってなりすまし発言
-        wh = await interaction.channel.create_webhook(name=name)
-        await wh.send(content=message, username=name, avatar_url=avatar_url)
-        await wh.delete()
+        whs = await interaction.channel.webhooks()
+        wh = discord.utils.find(lambda w: w.name == "MamechosuImpersonate", whs)
+        if not wh:
+            wh = await interaction.channel.create_webhook(name="MamechosuImpersonate")
+            
+        file = await attachment.to_file() if attachment else discord.utils.MISSING
+        sent_msg = await wh.send(content=message, username=name, avatar_url=avatar_url, wait=True, file=file)
 
         # バレ确率を取得 (DBに保存されていなければデフォルト 10%)
         expose_rate = gd.get("expose_rate", 10)  # 1〜100 の整数％10%=10
         will_expose = random.randint(1, 100) <= expose_rate
 
         if will_expose:
-            # かわいそうなバレ方で実行者を公開
             expose_msgs = [
-                f"実はこれ {interaction.user.mention} が言ってました！︎",
-                f"{interaction.user.mention} が空海虐をしています🙈",
-                f"実はこれ {interaction.user.mention} の発言でした🎯",
-                f"❗バレました！{interaction.user.mention} がなりすましていたようです︁",
+                f"ｷﾀ━━━━(ﾟ∀ﾟ)━━━━!!\nなりすまし犯人発見ｗｗｗｗｗｗｗｗｗ\n  ↑このメッセージ出したのコイツ → {interaction.user.mention} ｗｗｗ",
+                f"　　＿人人人人人人人＿\n　　＞  バ レ た ！ ＜\n　　￣Y^Y^Y^Y^Y^Y￣\n{interaction.user.mention} お前のなりすましバレバレやぞwwwwww 草不可避ｗｗｗｗ",
+                f"( ﾟ∀ﾟ)ｱﾊﾊ八八ﾉヽﾉヽﾉヽﾉ / \\\n{interaction.user.mention} がなりすまし失敗してて笑えるｗｗｗｗｗ\n恥ずかしくて死にたくなってそうｗｗｗ",
+                f"　∧_∧\n( ´∀｀) < {interaction.user.mention} がなりすまし！\n(　　)   こっちはとっくにバレてたｗｗｗ\n|  | |   ご苦労様でしたｗｗｗｗｗｗ",
+                f"wwwwwwwwwwwwwwwwww\n   {interaction.user.mention} の自作自演が完全にバレたｗｗｗｗｗ\nwwwwwwwwwwwwwwwwww\n哀れすぎてもう笑えないｗいや笑えるｗ",
+                f"m9(^Д^)ﾌﾟｷﾞｬｰ\n{interaction.user.mention} のなりすましダサすぎワロタｗｗｗｗｗ",
+                f"【悲報】 {interaction.user.mention} 氏、なりすましに失敗し無事死亡ｗｗｗｗｗｗ",
+                f"ﾌﾟｯ(※´Д｀※) \n{interaction.user.mention} が別人のフリしてるのバレてて草。息してる？ｗｗ",
+                f"はい、{interaction.user.mention} のなりすまし確定〜！\nみんなスクショ取れスクショ！！",
+                f"バレてやんの！ {interaction.user.mention} の自作自演だぞこれ！隠しきれると思った？ｗｗｗ",
+                f"(´・ω・`) {interaction.user.mention} のなりすまし…見てて辛いわ…",
+                f"おいおい、こいつ {interaction.user.mention} が他人のフリして喋ってるぞ！恥ずかしくないのか！ｗｗ",
+                f"正体現したね！ {interaction.user.mention} のなりすまし発言でしたー！",
+                f"うわぁ、{interaction.user.mention} がなりすましで喋ってる！見苦しいなあもう！",
+                f"ざぁぁぁこ！なりすましなんて姑息な手使って、まんまとバレてるのダサすぎでしょ！ {interaction.user.mention}",
+                f"＼(^o^)／ {interaction.user.mention} オワタ ＼(^o^)／\nなりすまし大失敗ｗｗｗｗ",
+                f"おーいみんなー！ {interaction.user.mention} がなりすまししてるぞー！指さして笑ってやれー！ｗｗｗ"
             ]
-            await interaction.channel.send(random.choice(expose_msgs))
+            await sent_msg.reply(random.choice(expose_msgs))
 
         await interaction.followup.send(
-            f"なりすましメッセージを送信しました。バレ機率: {expose_rate}%",
+            "なりすましメッセージを送信しました。",
             ephemeral=True
         )
     except Exception as e:
