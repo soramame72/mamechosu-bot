@@ -183,30 +183,6 @@ async def safe_defer(interaction: discord.Interaction, ephemeral=False):
     except Exception:
         pass
 
-# ──────────────────────────────────────────────
-# エラーハンドラ (全コマンド共通)
-# ──────────────────────────────────────────────
-@bot.tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    # 内部情報を外部に漏らさないようにユーザー向けメッセージを簡略化
-    if isinstance(error, app_commands.MissingPermissions):
-        msg = "権限が不足しています。"
-    elif isinstance(error, app_commands.CommandOnCooldown):
-        msg = f"クールダウン中です。{error.retry_after:.1f}秒後に再試行してください。"
-    elif isinstance(error, app_commands.NoPrivateMessage):
-        msg = "このコマンドはサーバー内でのみ使用できます。"
-    else:
-        msg = "コマンドの実行中にエラーが発生しました。"
-    # 詳細はコンソールに出力
-    print(f"[cmd_error] {type(error).__name__}: {error}")
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(msg, ephemeral=True)
-        else:
-            await interaction.response.send_message(msg, ephemeral=True)
-    except Exception:
-        pass
-
 
 # ──────────────────────────────────────────────
 # GROQ ステータス更新 (1分ごと、100/1でえっち喘ぎ声)
@@ -278,16 +254,20 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 
 @tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=JST))
 async def akeome_loop():
-    data = db_read("akeome", guild_id="global")
-    if not isinstance(data, dict):
-        return
-    for guild_id_str, channel_id in data.items():
-        ch = bot.get_channel(channel_id)
-        if ch:
-            try:
-                await ch.send("あけおめ")
-            except:
-                pass
+    for guild in bot.guilds:
+        data = db_read("akeome", guild_id=guild.id)
+        if not data: continue
+        target_channels = set()
+        if data.get("server"):
+            for ch in guild.text_channels:
+                target_channels.add(ch)
+        else:
+            for cid in data.get("channels", []):
+                ch = guild.get_channel(cid)
+                if ch: target_channels.add(ch)
+        for ch in target_channels:
+            try: await ch.send("あけおめ")
+            except: pass
 
 @bot.tree.command(name="akeomeset", description="毎日0時(JST)にあけおめメッセージを送信するチャンネルを設定します")
 @app_commands.describe(channel="送信するチャンネル")
@@ -755,21 +735,36 @@ class SpamView(discord.ui.View):
         self.spam_id = spam_id
 
     @discord.ui.button(label="停止", style=discord.ButtonStyle.danger)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.spam_id in self.spams_dict:
-            self.spams_dict[self.spam_id] = False
+    async def stop_spam(self, interaction: discord.Interaction, button: discord.ui.Button):
+        entry = self.spams_dict.get(self.spam_id)
+        if entry is not None:
+            if isinstance(entry, dict):
+                entry["running"] = False
+            else:
+                self.spams_dict[self.spam_id] = False
             await interaction.response.send_message("スパムを停止しました。", ephemeral=True)
         else:
             await interaction.response.send_message("すでに終了しているか、停止済みです。", ephemeral=True)
-        self.stop()
+        super().stop()
 
-@bot.tree.command(name="spam", description="指定したメッセージを指定回数、一定間隔で連投します")
+@bot.tree.command(name="spam", description="指定したメッセージを指定回数、一定間隔で連投します（実行中に再実行すると停止）")
 @app_commands.describe(message="連投するメッセージ", count="連投回数（最大50回）", interval="間隔（秒、0.5秒以上）")
 async def cmd_spam(interaction: discord.Interaction, message: str, count: int, interval: float = 1.0):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_messages:
         await interaction.followup.send("このコマンドを実行するには「メッセージの管理」権限が必要です。", ephemeral=True)
         return
+
+    if not hasattr(bot, "_active_spams"):
+        bot._active_spams = {}
+
+    # チャンネルにアクティブなスパムがある場合は停止
+    ch_id = interaction.channel_id
+    for sid, active in list(bot._active_spams.items()):
+        if isinstance(active, dict) and active.get("channel") == ch_id and active.get("running"):
+            active["running"] = False
+            await interaction.followup.send("実行中のスパムを停止しました。", ephemeral=True)
+            return
     
     if count < 1 or count > 50:
         await interaction.followup.send("連投回数は 1回〜50回 の間で指定してください。", ephemeral=True)
@@ -784,15 +779,13 @@ async def cmd_spam(interaction: discord.Interaction, message: str, count: int, i
         return
         
     spam_id = str(uuid.uuid4())
-    if not hasattr(bot, "_active_spams"):
-        bot._active_spams = {}
-    bot._active_spams[spam_id] = True
+    bot._active_spams[spam_id] = {"channel": ch_id, "running": True}
     
     view = SpamView(bot._active_spams, spam_id)
-    await interaction.followup.send(f"スパムを開始します（{count}回, {interval}秒間隔）", view=view, ephemeral=True)
+    await interaction.followup.send(f"スパムを開始します（{count}回, {interval}秒間隔）\n再度 /spam を実行するか「停止」ボタンでスパムを停止できます。", view=view, ephemeral=True)
     
     for i in range(count):
-        if not bot._active_spams.get(spam_id, False):
+        if not bot._active_spams.get(spam_id, {}).get("running", False):
             break
         try:
             await interaction.channel.send(message)
@@ -806,6 +799,7 @@ async def cmd_spam(interaction: discord.Interaction, message: str, count: int, i
 @bot.tree.command(name="ranking", description="サーバー内の活動ランキング（TOP 10）を表示します")
 @app_commands.describe(category="ランキングの部門")
 @app_commands.choices(category=[
+    app_commands.Choice(name="総合（スコア制）",      value="total"),
     app_commands.Choice(name="メッセージ送信数",     value="msg_count"),
     app_commands.Choice(name="添付ファイル数",     value="attachment_count"),
     app_commands.Choice(name="合計文字数",       value="char_count"),
@@ -820,6 +814,7 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
     medals = ["1位", "2位", "3位", "4位", "5位", "6位", "7位", "8位", "9位", "10位"]
 
     title_map = {
+        "total":           "総合スコア",
         "msg_count":       "メッセージ送信数",
         "attachment_count": "添付ファイル送信数",
         "char_count":      "合計文字数",
@@ -904,7 +899,19 @@ async def cmd_ranking(interaction: discord.Interaction, category: str = "msg_cou
         "url_count":        url_counts,
         "mention_count":    mention_counts,
     }
-    counts = data_map.get(category, {})
+    if category == "total":
+        total_counts = {}
+        for uid in msg_counts:
+            total_counts[uid] = (
+                msg_counts.get(uid, 0) * 1 +
+                attachment_counts.get(uid, 0) * 3 +
+                reaction_counts.get(uid, 0) * 2 +
+                url_counts.get(uid, 0) * 1 +
+                int(char_counts.get(uid, 0) * 0.01)
+            )
+        counts = total_counts
+    else:
+        counts = data_map.get(category, {})
     sorted_data = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
     if not sorted_data:
@@ -1128,8 +1135,16 @@ class _ToggleButton(discord.ui.Button):
             feat_txt = "川柳検出"
         elif self.feature == "atsumori":
             feat_txt = "熱盛検知"
-        else:
+        elif self.feature == "lewd":
             feat_txt = "えっち検出"
+        elif self.feature == "romaji":
+            feat_txt = "ローマ字翻訳"
+        elif self.feature == "impersonate":
+            feat_txt = "なりすまし機能"
+        elif self.feature == "akeome":
+            feat_txt = "あけおめ機能"
+        else:
+            feat_txt = "機能"
         await interaction.response.send_message(
             f"{scope_txt}の{feat_txt}を {'ON' if self.on else 'OFF'} にしました。", ephemeral=True)
 
@@ -1291,6 +1306,15 @@ class _BtnStopAIChat(discord.ui.Button):
             try: session["task"].cancel()
             except: pass
             _save_active_chats()
+            try:
+                ch = bot.get_channel(self.cid)
+                if ch:
+                    for wh in await ch.webhooks():
+                        if wh.name == "MamechosuChat":
+                            await wh.delete()
+                            break
+            except Exception:
+                pass
             await i.response.send_message("AIチャットを終了しました", ephemeral=True)
         else:
             await i.response.send_message("AIチャットは稼働中ではありません", ephemeral=True)
@@ -1391,39 +1415,25 @@ class _BtnSetImpersonateChance(discord.ui.Button):
     async def callback(self, i):
         await i.response.send_modal(ImpersonateChanceModal(self.gid))
 
-class AkeomeSetModal(discord.ui.Modal, title="あけおめ設定"):
-    ch_id = discord.ui.TextInput(
-        label="チャンネルID",
-        placeholder="例: 123456789012345678",
-        required=True
-    )
+class _BtnImpersonateLog(discord.ui.Button):
     def __init__(self, gid):
-        super().__init__()
-        self.gid = gid
-        data = db_read("akeome", guild_id="global")
-        if isinstance(data, dict) and str(gid) in data:
-            self.ch_id.default = str(data[str(gid)])
-            
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            cid = int(self.ch_id.value)
-        except:
-            await interaction.response.send_message("チャンネルIDは数字で入力してください。", ephemeral=True)
-            return
-            
-        data = db_read("akeome", guild_id="global")
-        if not isinstance(data, dict):
-            data = {}
-        data[str(self.gid)] = cid
-        db_write("akeome", data, guild_id="global")
-        await interaction.response.send_message(f"毎日あけおめメッセージを <#{cid}> に送信するように設定しました。", ephemeral=True)
-
-class _BtnSetAkeome(discord.ui.Button):
-    def __init__(self, gid):
-        super().__init__(label="あけおめch設定", style=discord.ButtonStyle.secondary, row=3)
+        super().__init__(label="なりすましログ確認", style=discord.ButtonStyle.primary, row=4)
         self.gid = gid
     async def callback(self, i):
-        await i.response.send_modal(AkeomeSetModal(self.gid))
+        import datetime
+        log_data = db_read("impersonate_log", guild_id=self.gid)
+        if not log_data:
+            await i.response.send_message("なりすましの履歴はありません。", ephemeral=True)
+            return
+        embed = discord.Embed(title="なりすましログ（過去30日）", color=0x5865F2)
+        desc = ""
+        for log in reversed(log_data[-10:]):
+            dt = datetime.datetime.fromtimestamp(log["timestamp"]).strftime("%Y/%m/%d %H:%M")
+            desc += f"`{dt}` **{log['executor']}** → **{log['target']}**\n"
+            desc += f"> {log['content'][:30]}\n"
+            desc += f"[リンク]({log['url']})\n\n"
+        embed.description = desc
+        await i.response.send_message(embed=embed, ephemeral=True)
 
 class _BtnCPHelp(discord.ui.Button):
     def __init__(self):
@@ -1481,7 +1491,7 @@ class CPView(discord.ui.View):
             self.add_item(_BtnPreviewWelcome(gid)); self.add_item(_BtnPreviewGoodbye(gid))
             self.add_item(_BtnAddWord(gid));        self.add_item(_BtnListWords(gid))
             self.add_item(_BtnAddAutoreply(gid));   self.add_item(_BtnListAutoreply(gid))
-            self.add_item(_BtnSetAkeome(gid));      self.add_item(_BtnCPHelp())
+            self.add_item(_BtnCPHelp())
 
         elif p == 1:
             # ページ2: 川柳 ON/OFF (このch / 全体)
@@ -1520,7 +1530,7 @@ class CPView(discord.ui.View):
                                             guild_id=gid, feature=feat, scope=scope, on=on))
 
         elif p == 4:
-            # ページ5: ローマ字翻訳 / なりすまし ON/OFF
+            # ページ5: ローマ字翻訳 / なりすまし / あけおめ ON/OFF
             specs = [
                 ("ローマ字 ON  (このch)", "romaji", "channel", True,  discord.ButtonStyle.success, 0),
                 ("ローマ字 OFF (このch)", "romaji", "channel", False, discord.ButtonStyle.danger,  0),
@@ -1528,13 +1538,14 @@ class CPView(discord.ui.View):
                 ("ローマ字 OFF (全体)",   "romaji", "server",  False, discord.ButtonStyle.danger,  1),
                 ("なりすまし ON  (このch)", "impersonate", "channel", True,  discord.ButtonStyle.success, 2),
                 ("なりすまし OFF (このch)", "impersonate", "channel", False, discord.ButtonStyle.danger,  2),
-                ("なりすまし ON  (全体)",   "impersonate", "server",  True,  discord.ButtonStyle.success, 3),
-                ("なりすまし OFF (全体)",   "impersonate", "server",  False, discord.ButtonStyle.danger,  3),
+                ("あけおめ ON  (このch)", "akeome", "channel", True,  discord.ButtonStyle.success, 3),
+                ("あけおめ OFF (このch)", "akeome", "channel", False, discord.ButtonStyle.danger,  3),
             ]
             for label, feat, scope, on, style, row in specs:
                 self.add_item(_ToggleButton(label=label, style=style, row=row,
                                             guild_id=gid, feature=feat, scope=scope, on=on))
             self.add_item(_BtnSetImpersonateChance(gid))
+            self.add_item(_BtnImpersonateLog(gid))
 
         elif p == 5:
             # ページ6: サーバー情報・バックアップ / パネル作成
@@ -1859,6 +1870,26 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
+        
+    # miq トリガー
+    if message.reference and message.reference.message_id and "miq" in message.content.lower() and bot.user in message.mentions:
+        try:
+            target_msg = await message.channel.fetch_message(message.reference.message_id)
+            if target_msg.content:
+                avatar_bytes = b""
+                try:
+                    if target_msg.author.display_avatar:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(target_msg.author.display_avatar.url) as resp:
+                                if resp.status == 200:
+                                    avatar_bytes = await resp.read()
+                except: pass
+                img_file = await _make_quote_file(target_msg.content, target_msg.author.display_name, avatar_bytes, guild=message.guild, username=target_msg.author.name)
+                await message.reply(file=img_file)
+                return
+        except Exception:
+            pass
+
     await bot.process_commands(message)
     # DM受信時 → えっち語録をランダム返信
     if not message.guild:
@@ -2054,76 +2085,18 @@ async def cmd_autoreply(interaction: discord.Interaction, action: str, trigger: 
 async def context_quote(interaction: discord.Interaction, message: discord.Message):
     await safe_defer(interaction)
     
-    text = message.content or " "
-    author_name = message.author.display_name
-    avatar_url = message.author.display_avatar.url
-    
     avatar_bytes = b""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(avatar_url) as resp:
-                if resp.status == 200:
-                    avatar_bytes = await resp.read()
+        if message.author.display_avatar:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(message.author.display_avatar.url) as resp:
+                    if resp.status == 200:
+                        avatar_bytes = await resp.read()
     except:
         pass
-        
-    def _make_image():
-        img = Image.new("RGB", (1200, 630), "black")
-        if avatar_bytes:
-            try:
-                avatar = Image.open(BytesIO(avatar_bytes)).convert("L")
-                
-                # Aspect ratio crop
-                w, h = avatar.size
-                size = min(w, h)
-                avatar = avatar.crop(((w-size)//2, (h-size)//2, (w+size)//2, (h+size)//2))
-                avatar = avatar.resize((630, 630), Image.Resampling.LANCZOS)
-                
-                # Paste on left side
-                img.paste(avatar, (0, 0))
-                
-                # Dark gradient to fade out right side of avatar
-                gradient = Image.new("L", (630, 630))
-                g_draw = ImageDraw.Draw(gradient)
-                for x in range(630):
-                    alpha = int(255 * (1 - (x / 630) ** 2))
-                    g_draw.line([(x, 0), (x, 630)], fill=alpha)
-                
-                img.paste((0,0,0), (0,0), mask=Image.eval(gradient, lambda a: 255-a))
-            except:
-                pass
 
-        draw = ImageDraw.Draw(img)
-        font = ImageFont.load_default()
-        author_font = ImageFont.load_default()
-        for fp in ["/System/Library/Fonts/ヒラギノ明朝 ProN.ttc", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"]:
-            if os.path.exists(fp):
-                font = ImageFont.truetype(fp, 50)
-                author_font = ImageFont.truetype(fp, 40)
-                break
-                
-        # Wrapping text (roughly 15 chars per line for CJK)
-        wrapped_text = ""
-        line = ""
-        for char in text:
-            line += char
-            if len(line) >= 15 or char == "\n":
-                wrapped_text += line.strip() + "\n"
-                line = ""
-        if line:
-            wrapped_text += line.strip()
-            
-        quote_str = f"“{wrapped_text.strip()}”"
-        draw.multiline_text((680, 150), quote_str, fill="white", font=font, spacing=15)
-        draw.text((750, 480), f"― {author_name}", fill="gray", font=author_font)
-        
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return discord.File(buf, filename="quote.png")
-        
     try:
-        file = await asyncio.to_thread(_make_image)
+        file = await _make_quote_file(message.content or " ", message.author.display_name, avatar_bytes, guild=interaction.guild, username=message.author.name)
         await interaction.followup.send(file=file)
     except Exception as e:
         await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
@@ -2778,6 +2751,22 @@ def _serialize_overwrites(overwrites: dict) -> dict:
         result[key] = {"allow": allow.value, "deny": deny.value, "name": getattr(target, "name", "")}
     return result
 
+def _deserialize_overwrites(guild: discord.Guild, overwrites_data: dict) -> dict:
+    result = {}
+    if not overwrites_data: return result
+    for key, data in overwrites_data.items():
+        if key.startswith("role_"):
+            name = data.get("name")
+            role = discord.utils.get(guild.roles, name=name)
+            if not role and name == "@everyone":
+                role = guild.default_role
+            if role:
+                result[role] = discord.PermissionOverwrite.from_pair(
+                    discord.Permissions(data["allow"]),
+                    discord.Permissions(data["deny"])
+                )
+    return result
+
 async def _perform_save(interaction: discord.Interaction, guild: discord.Guild):
     backup = {
         "guild_name": guild.name,
@@ -2932,7 +2921,8 @@ async def do_restore(interaction: discord.Interaction, backup: dict):
     cat_map = {}
     for cd in sorted(backup.get("categories", []), key=lambda c: c["position"]):
         try:
-            cat = await guild.create_category(name=cd["name"])
+            ow = _deserialize_overwrites(guild, cd.get("overwrites", {}))
+            cat = await guild.create_category(name=cd["name"], overwrites=ow)
             cat_map[cd["name"]] = cat
             await asyncio.sleep(0.3)
         except Exception:
@@ -2945,23 +2935,27 @@ async def do_restore(interaction: discord.Interaction, backup: dict):
         try:
             cat = cat_map.get(chd.get("category"))
             ct  = chd["type"]
+            ow = _deserialize_overwrites(guild, chd.get("overwrites", {}))
             if "text" in ct or "news" in ct:
                 new_ch = await guild.create_text_channel(
-                    name=chd["name"], category=cat,
+                    name=chd["name"], category=cat, overwrites=ow,
                     nsfw=chd.get("nsfw", False), topic=chd.get("topic"),
                     slowmode_delay=chd.get("slowmode", 0))
+                if "news" in ct:
+                    try: await new_ch.edit(type=discord.ChannelType.news)
+                    except: pass
                 if chd.get("private"):
                     await new_ch.set_permissions(guild.default_role, view_channel=False)
                 if log_ch is None and not chd.get("private"):
                     log_ch = new_ch
             elif "voice" in ct:
-                nv = await guild.create_voice_channel(name=chd["name"], category=cat)
+                nv = await guild.create_voice_channel(name=chd["name"], category=cat, overwrites=ow)
                 if chd.get("private"):
                     await nv.set_permissions(guild.default_role, view_channel=False)
             elif "stage" in ct:
-                await guild.create_stage_channel(name=chd["name"], category=cat)
+                await guild.create_stage_channel(name=chd["name"], category=cat, overwrites=ow)
             elif "forum" in ct:
-                await guild.create_forum(name=chd["name"], category=cat)
+                await guild.create_forum(name=chd["name"], category=cat, overwrites=ow)
             await asyncio.sleep(0.3)
         except Exception:
             pass
@@ -3704,49 +3698,302 @@ QUOTE_THEMES = {
     "red":   {"bg":(45,18,22),    "fg":(245,225,220), "accent":(200,80,70),   "sub":(170,120,115)},
 }
 
-def build_quote_image(text: str, author: str = "", theme_name: str = "dark") -> Image.Image:
-    import random as _rnd
-    th = QUOTE_THEMES.get(theme_name, QUOTE_THEMES["dark"])
-    BG, FG, ACCENT, SUB = th["bg"], th["fg"], th["accent"], th["sub"]
-    W, H, PAD = 700, 400, 50
+import re as _re_md
+
+# Twemoji絵文字パターン（Unicode範囲）
+_EMOJI_PATTERN = _re_md.compile(
+    r'[\U0001F300-\U0001F9FF'
+    r'\U0001FA00-\U0001FAFF'
+    r'\U00002600-\U000027BF'
+    r'\U0001F1E0-\U0001F1FF'  # 国旗
+    r']+(?:\uFE0F|\u200D[\U0001F300-\U0001F9FF])*'
+)
+
+def _clean_markdown_only(text: str) -> str:
+    """Discordマークダウン記号のみ除去。絵文字(Unicode)は残す。カスタム絵文字はそのまま保持。"""
+    text = _re_md.sub(r"```[\s\S]*?```", "", text)
+    text = _re_md.sub(r"`[^`]*`", "", text)
+    text = _re_md.sub(r"^#{1,6}\s+", "", text, flags=_re_md.MULTILINE)
+    text = _re_md.sub(r"\*{1,3}([^*\n]*)\*{1,3}", r"\1", text)
+    text = _re_md.sub(r"_{1,2}([^_\n]*)_{1,2}", r"\1", text)
+    text = _re_md.sub(r"~~([^~]*)~~", r"\1", text)
+    text = _re_md.sub(r"^>\s?", "", text, flags=_re_md.MULTILINE)
+    return text.strip()
+
+_CUSTOM_EMOJI_PATTERN = _re_md.compile(r"<(a?):(\w+):(\d+)>")
+
+async def _fetch_emoji_images(text: str, guild: "discord.Guild | None" = None) -> dict:
+    """Unicode絵文字(Twemoji)とカスタム絵文字(Discord CDN)をダウンロード"""
+    result = {}
+    try:
+        async with aiohttp.ClientSession() as session:
+            for m in _CUSTOM_EMOJI_PATTERN.finditer(text):
+                animated, name, eid = m.group(1), m.group(2), m.group(3)
+                key = m.group(0)
+                if key in result:
+                    continue
+                ext = "gif" if animated else "png"
+                url = f"https://cdn.discordapp.com/emojis/{eid}.{ext}?size=64"
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                        if resp.status == 200:
+                            result[key] = await resp.read()
+                except Exception:
+                    pass
+
+            for emoji_char in set(_EMOJI_PATTERN.findall(text)):
+                cps = [f"{ord(c):x}" for c in emoji_char if ord(c) != 0xFE0F]
+                cp_str = "-".join(cps)
+                urls = [
+                    f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{cp_str}.png",
+                    f"https://twemoji.maxcdn.com/v/latest/72x72/{cp_str}.png",
+                ]
+                try:
+                    for url in urls:
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                            if resp.status == 200:
+                                result[emoji_char] = await resp.read()
+                                break
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return result
+
+def _split_for_render(text: str) -> list:
+    """テキストを ('text', str) | ('emoji', str) のセグメントリストに分割。カスタム絵文字にも対応。"""
+    import re as _re2
+    combined = _re2.compile(
+        r"(<a?:\w+:\d+>)"
+        r"|"
+        r"([🌀-🧿🨀-🫿☀-➿🇠-🇿]"
+        r"+(?:️|‍[🌀-🧿])*)"
+    )
+    segments = []
+    last = 0
+    for m in combined.finditer(text):
+        if m.start() > last:
+            segments.append(('text', text[last:m.start()]))
+        segments.append(('emoji', m.group()))
+        last = m.end()
+    if last < len(text):
+        segments.append(('text', text[last:]))
+    return segments
+
+def _measure_seg(seg_type: str, content: str, font, emoji_size: int) -> int:
+    """セグメントの描画幅を返す"""
+    if seg_type == 'emoji':
+        return emoji_size + 2
+    try:
+        bb = font.getbbox(content)
+        return bb[2] - bb[0]
+    except Exception:
+        return len(content) * font.size
+
+def _wrap_mixed(text: str, font, emoji_size: int, max_width: int) -> list:
+    """テキストを行ごとのセグメントリスト（list[list[tuple]]）に変換"""
+    all_lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            all_lines.append([])
+            continue
+        raw_segs = _split_for_render(paragraph)
+        cur_line = []
+        cur_w = 0
+        for seg_type, content in raw_segs:
+            if seg_type == 'emoji':
+                w = emoji_size + 2
+                if cur_w + w > max_width and cur_line:
+                    all_lines.append(cur_line)
+                    cur_line = []
+                    cur_w = 0
+                cur_line.append(('emoji', content))
+                cur_w += w
+            else:
+                for char in content:
+                    try:
+                        cw = font.getbbox(char)[2]
+                    except Exception:
+                        cw = max(font.size // 2, 4)
+                    if cur_w + cw > max_width and cur_line:
+                        all_lines.append(cur_line)
+                        cur_line = []
+                        cur_w = 0
+                    if cur_line and cur_line[-1][0] == 'text':
+                        cur_line[-1] = ('text', cur_line[-1][1] + char)
+                    else:
+                        cur_line.append(('text', char))
+                    cur_w += cw
+        if cur_line:
+            all_lines.append(cur_line)
+    return all_lines
+
+def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"",
+                      theme_name: str = "dark", emoji_images: dict = None,
+                      username: str = "") -> Image.Image:
+    if emoji_images is None:
+        emoji_images = {}
+    text = _clean_markdown_only(text) or " "
+
+    W, H   = 1200, 630
+    BG     = (8, 8, 8)
+    FG     = (245, 245, 245)
+    SUB    = (130, 130, 130)
+    ACCENT = (220, 220, 220)
+    TINY   = (60, 60, 60)
+    SEP    = (38, 38, 38)
+
+    font_paths = [
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Geneva.ttf",
+    ]
+    def load_font(size: int):
+        for fp in font_paths:
+            if os.path.exists(fp):
+                try: return ImageFont.truetype(fp, size)
+                except Exception: continue
+        return ImageFont.load_default()
+
     img  = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
-    for y in range(H):
-        t = y / H * 0.15
-        r = max(0, min(255, int(BG[0]+(255-BG[0])*t*0.3)))
-        g = max(0, min(255, int(BG[1]+(255-BG[1])*t*0.3)))
-        b = max(0, min(255, int(BG[2]+(255-BG[2])*t*0.3)))
-        draw.line([(0,y),(W,y)], fill=(r,g,b))
-    for _ in range(3000):
-        x,y = _rnd.randint(0,W-1), _rnd.randint(0,H-1)
-        v = _rnd.randint(-12,12)
-        r2,g2,b2 = img.getpixel((x,y))
-        draw.point((x,y), fill=(max(0,min(255,r2+v)),max(0,min(255,g2+v)),max(0,min(255,b2+v))))
-    draw.rectangle([PAD-16,PAD,PAD-12,H-PAD], fill=ACCENT)
-    qf = _load_font(110)
-    draw.text((PAD+2,PAD-28), "“", font=qf, fill=ACCENT, anchor="lt")
-    body_font = _load_font(30 if len(text)<=20 else (22 if len(text)<=50 else 16))
-    max_w = W - PAD*2 - 20
-    words = text.split() if any(c.isascii() and c.isalpha() for c in text) else list(text)
-    lines_out, cur = [], ""
-    for w in words:
-        test = cur + w
-        bbox = body_font.getbbox(test)
-        if bbox[2]-bbox[0] > max_w and cur:
-            lines_out.append(cur); cur = w
-        else:
-            cur = test
-    if cur: lines_out.append(cur)
-    lh = body_font.size + 10
-    ty = (H - lh*len(lines_out)) // 2
-    for line in lines_out:
-        draw.text((PAD+10, ty), line, font=body_font, fill=FG, anchor="lt"); ty += lh
-    if author:
-        af = _load_font(18)
-        draw.line([(W-PAD-200,H-PAD-28),(W-PAD,H-PAD-28)], fill=ACCENT, width=1)
-        draw.text((W-PAD,H-PAD-6), f"— {author}", font=af, fill=SUB, anchor="rb")
-    draw.rectangle([PAD,H-PAD+8,W-PAD,H-PAD+10], fill=ACCENT)
+
+    # ── 左: アバター（グレースケール + 右フェード）──────────
+    AV_W = int(W * 0.40)
+    has_avatar = False
+    if avatar_bytes:
+        try:
+            av = Image.open(BytesIO(avatar_bytes)).convert("RGBA")
+            aw, ah = av.size
+            s = min(aw, ah)
+            av = av.crop(((aw-s)//2, (ah-s)//2, (aw+s)//2, (ah+s)//2))
+            av = av.resize((AV_W, H), Image.Resampling.LANCZOS)
+            av_gray = av.convert("L")
+
+            # 右端に向かって黒へ線形フェード（60%→100%の範囲）
+            fade = Image.new("L", (AV_W, H), 255)
+            fade_start = int(AV_W * 0.58)
+            for x in range(fade_start, AV_W):
+                t = (x - fade_start) / (AV_W - fade_start)
+                # ease-in で急速に暗くする
+                alpha = int(255 * (1 - t ** 1.4))
+                ImageDraw.Draw(fade).line([(x, 0), (x, H)], fill=max(0, alpha))
+
+            from PIL import ImageChops as _IC
+            blended = Image.composite(
+                Image.new("L", (AV_W, H), 0),
+                av_gray,
+                _IC.invert(fade)
+            )
+            img.paste(blended.convert("RGB"), (0, 0))
+            has_avatar = True
+        except Exception:
+            pass
+
+    # ── 縦セパレーター ────────────────────────────────────
+    SEP_X = AV_W if has_avatar else 0
+    if has_avatar:
+        for y in range(H):
+            t = abs(y / H - 0.5) * 2          # 0(中央)→1(端)
+            alpha = int(SEP[0] * (1 - t ** 2))
+            draw.point((SEP_X, y), fill=(alpha, alpha, alpha))
+
+    # ── 右: テキストエリア ────────────────────────────────
+    PAD_L  = 64 if has_avatar else 90
+    PAD_R  = 64
+    TX     = SEP_X + PAD_L
+    TRX    = W - PAD_R
+    TW     = TRX - TX
+    TY_TOP = 68
+    TY_BOT = H - 118
+    TH     = TY_BOT - TY_TOP
+
+    # フォントサイズ自動決定
+    best_font, best_lines, best_size = None, [], 18
+    for fs in range(68, 17, -2):
+        f  = load_font(fs)
+        em = max(fs, 22)
+        lines = _wrap_mixed(text, f, em, TW)
+        lh = int(fs * 1.62)
+        if lh * len(lines) <= TH:
+            best_font, best_lines, best_size = f, lines, fs
+            break
+    if best_font is None:
+        best_font  = load_font(17)
+        best_size  = 17
+        best_lines = _wrap_mixed(text, best_font, 17, TW)
+
+    emoji_size = max(best_size, 24)
+    line_h     = int(best_size * 1.62)
+    total_h    = line_h * len(best_lines)
+    cx         = TX + TW // 2
+
+    def seg_width(segs):
+        w = 0
+        for st, ct in segs:
+            if st == "emoji":
+                w += emoji_size + int(best_size * 0.14)
+            else:
+                try: w += best_font.getbbox(ct)[2] - best_font.getbbox(ct)[0]
+                except: w += best_size * len(ct)
+        return w
+
+    y = TY_TOP + (TH - total_h) // 2
+    for line_segs in best_lines:
+        lw = seg_width(line_segs)
+        x  = cx - lw // 2
+        for seg_type, content in line_segs:
+            if seg_type == "emoji":
+                em_data = emoji_images.get(content)
+                if em_data:
+                    try:
+                        em_img = Image.open(BytesIO(em_data)).convert("RGBA")
+                        em_img = em_img.resize((emoji_size, emoji_size), Image.Resampling.LANCZOS)
+                        img.paste(em_img, (x, y + (line_h - emoji_size) // 2), mask=em_img)
+                        x += emoji_size + int(best_size * 0.14)
+                        continue
+                    except Exception:
+                        pass
+                draw.text((x, y), content, font=best_font, fill=FG)
+                try: x += best_font.getbbox(content)[2] - best_font.getbbox(content)[0]
+                except: x += best_size
+            else:
+                draw.text((x, y), content, font=best_font, fill=FG)
+                try: x += best_font.getbbox(content)[2] - best_font.getbbox(content)[0]
+                except: x += best_size * len(content)
+        y += line_h
+
+    # ── 著者ブロック ──────────────────────────────────────
+    # 細い水平線
+    sep_y = TY_BOT + 10
+    draw.rectangle([cx - 60, sep_y, cx + 60, sep_y + 1], fill=SEP)
+
+    author_font   = load_font(26)
+    username_font = load_font(17)
+    ay = sep_y + 14
+    if author_name:
+        draw.text((cx, ay), f"— {author_name}", font=author_font, fill=ACCENT, anchor="mt")
+        ay += 34
+    if username:
+        draw.text((cx, ay), f"@{username}", font=username_font, fill=SUB, anchor="mt")
+
+    # ── 左下: ウォーターマーク ───────────────────────────
+    wm_font = load_font(15)
+    draw.text((18, H - 18), "Make it a Quote", font=wm_font, fill=TINY, anchor="lb")
+
     return img
+
+async def _make_quote_file(text: str, author_name: str, avatar_bytes: bytes = b"",
+                           theme_name: str = "dark", guild: "discord.Guild | None" = None,
+                           username: str = "") -> discord.File:
+    emoji_images = await _fetch_emoji_images(text, guild=guild)
+    img = build_quote_image(text, author_name, avatar_bytes,
+                            theme_name=theme_name, emoji_images=emoji_images, username=username)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return discord.File(buf, filename="quote.png")
 
 @bot.tree.command(name="quote", description="名言カード画像を生成します")
 @app_commands.describe(text="名言の本文（200文字以内）", author="著者名（省略可）",
@@ -3755,10 +4002,131 @@ async def cmd_quote(interaction: discord.Interaction, text: str, author: str = "
     await safe_defer(interaction)
     if len(text) > 200:
         await interaction.followup.send("200文字以内で入力してください。", ephemeral=True); return
-    img = build_quote_image(text, author, theme if theme in QUOTE_THEMES else "dark")
-    buf = BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
-    await interaction.followup.send(file=discord.File(buf, "quote.png"))
 
+    author_name = author or interaction.user.display_name
+    avatar_bytes = b""
+    if not author and interaction.user.display_avatar:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(interaction.user.display_avatar.url) as resp:
+                    if resp.status == 200:
+                        avatar_bytes = await resp.read()
+        except: pass
+
+    uname = interaction.user.name if not author else ""
+    file = await _make_quote_file(text, author_name, avatar_bytes, theme_name=theme, guild=interaction.guild, username=uname)
+    await interaction.followup.send(file=file)
+
+@bot.tree.command(name="meigen", description="過去150件の会話からAIが迷言を1つ選び、名言カード画像を生成します")
+async def cmd_meigen(interaction: discord.Interaction):
+    await safe_defer(interaction)
+    if not interaction.guild:
+        await interaction.followup.send("サーバー内でのみ使用できます。", ephemeral=True); return
+
+    # 実在するメッセージを最大1000件収集（内容・著者・member objectを保持）
+    raw_msgs = []
+    try:
+        async for msg in interaction.channel.history(limit=1000):
+            if msg.author.bot or not msg.content.strip():
+                continue
+            raw_msgs.append({
+                "display": msg.author.display_name,
+                "name": msg.author.name,
+                "content": msg.content.strip(),
+                "member": interaction.guild.get_member(msg.author.id),
+            })
+    except Exception as e:
+        await interaction.followup.send(f"履歴取得エラー: {e}", ephemeral=True); return
+
+    if len(raw_msgs) < 3:
+        await interaction.followup.send("会話履歴が少なすぎます。", ephemeral=True); return
+
+    # AIに渡す番号付きログ（古い順）
+    numbered = list(reversed(raw_msgs))
+    log_lines = [f"[{i}] {m['display']}: {m['content'][:120]}" for i, m in enumerate(numbered)]
+    history_text = "\n".join(log_lines)
+
+    prompt = (
+        "以下はDiscordチャンネルの会話ログです（番号付き）。\n"
+        "この中から最も面白い・印象的・迷言っぽい発言を1つ選んでください。\n"
+        "必ずログに存在する番号を選んでください。\n\n"
+        "【出力形式】以下のJSON形式のみで出力してください。説明文は不要です。\n"
+        '{"index": 番号, "text": "発言の内容（原文のまま）", "author": "発言者の名前"}\n\n'
+        f"会話ログ:\n{history_text}"
+    )
+
+    selected_text, selected_author, selected_member = "", "", None
+    try:
+        import json as _json
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 300,
+                    "temperature": 0.7,
+                },
+                timeout=aiohttp.ClientTimeout(total=25),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    raw = data["choices"][0]["message"]["content"].strip()
+                    raw_clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+                    parsed = _json.loads(raw_clean)
+                    idx = parsed.get("index")
+                    if idx is not None and 0 <= int(idx) < len(numbered):
+                        entry = numbered[int(idx)]
+                        selected_text   = entry["content"]
+                        selected_author = entry["display"]
+                        selected_member = entry["member"]
+                    else:
+                        selected_text   = parsed.get("text", "").strip()
+                        selected_author = parsed.get("author", "").strip()
+                        selected_member = interaction.guild.get_member_named(selected_author) if selected_author else None
+    except Exception as e:
+        await interaction.followup.send(f"AI処理エラー: {e}", ephemeral=True); return
+
+    if not selected_text:
+        await interaction.followup.send("迷言が見つかりませんでした。", ephemeral=True); return
+
+    avatar_bytes = b""
+    if selected_member and selected_member.display_avatar:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(selected_member.display_avatar.url) as resp:
+                    if resp.status == 200:
+                        avatar_bytes = await resp.read()
+        except: pass
+
+    uname = selected_member.name if selected_member else ""
+    file = await _make_quote_file(selected_text, selected_author or "不明", avatar_bytes,
+                                  guild=interaction.guild, username=uname)
+    await interaction.followup.send(file=file)
+
+def _wrap_text(text: str, font, max_width: int) -> list[str]:
+    """テキストをmax_widthに収まるように折り返す。改行文字も尊重する。"""
+    lines_out = []
+    for paragraph in text.split("\n"):
+        if not paragraph:
+            lines_out.append("")
+            continue
+        cur = ""
+        for char in paragraph:
+            test = cur + char
+            try:
+                w = font.getbbox(test)[2]
+            except Exception:
+                w = len(test) * font.size
+            if w > max_width and cur:
+                lines_out.append(cur)
+                cur = char
+            else:
+                cur = test
+        if cur:
+            lines_out.append(cur)
+    return lines_out
 
 # ──────────────────────────────────────────────
 # /purge
@@ -3970,12 +4338,11 @@ async def _groq_check_atsumori(text: str) -> bool:
         prompt = (
             "あなたはテレビ朝日報道ステーションの熱盛コーナーの審査員です。"
             "次のメッセージが熱盛かどうか判定してください。\n\n"
-            "「はい」にする条件（以下の条件を【両方】満たす場合のみ「はい」）:\n"
-            "1. 「熱盛」「あつもり」「アツモリ」「ATSUMORI」などのキーワードが含まれている\n"
-            "2. さらに、内容がスポーツ・ゲーム等の劇的な好プレー・逆転・感動的な場面、または非常に熱い情熱を感じさせるものである\n\n"
-            "「いいえ」にする条件（以下に一つでも当てはまるなら「いいえ」）:\n"
-            "- キーワードが含まれていても、単なる日常会話・質問・挨拶・事務連絡である\n"
-            "- 感情の起伏がない、または短すぎて状況がわからない\n\n"
+            "「はい」にする条件（以下のどちらかを満たす場合）:\n"
+            "1. 「熱盛」「あつもり」「アツモリ」「ATSUMORI」などのキーワードが含まれており、内容が激しい感情・興奮・熱中・すごいプレーなどを感じさせる\n"
+            "2. キーワードがなくても、内容が非常に熱くて盛り上がっており、明らかに熱盛コーナーにふさわしい場面（大逆転・劇的な出来事・極限の情熱など）である\n\n"
+            "「いいえ」にする条件（以下に当てはまるなら「いいえ」）:\n"
+            "- 完全に平凡な日常会話・挨拶・事務連絡で感情の昂りが全くない\n\n"
             f"メッセージ: 「{text}」\n\n"
             "熱盛なら「はい」、そうでなければ「いいえ」とだけ答えてください。"
         )
@@ -4140,6 +4507,21 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
         file = await attachment.to_file() if attachment else discord.utils.MISSING
         sent_msg = await wh.send(content=message, username=name, avatar_url=avatar_url, wait=True, file=file)
 
+        import time
+        log_data = db_read("impersonate_log", guild_id=interaction.guild_id)
+        if not isinstance(log_data, list):
+            log_data = []
+        log_data.append({
+            "timestamp": time.time(),
+            "executor": interaction.user.display_name,
+            "target": name,
+            "content": message,
+            "url": sent_msg.jump_url if sent_msg else "Unknown"
+        })
+        thirty_days_ago = time.time() - 30 * 24 * 60 * 60
+        log_data = [log for log in log_data if log["timestamp"] > thirty_days_ago]
+        db_write("impersonate_log", log_data, guild_id=interaction.guild_id)
+
         # バレ确率を取得 (DBに保存されていなければデフォルト 10%)
         expose_rate = gd.get("expose_rate", 10)  # 1〜100 の整数％10%=10
         will_expose = random.randint(1, 100) <= expose_rate
@@ -4301,7 +4683,7 @@ async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: s
         return ""
     
     messages = [
-        {"role": "system", "content": f"{char.system_prompt}\nあなたは「{char.display_name}」として振る舞ってください。話題: {base_topic}"}
+        {"role": "system", "content": f"{char.system_prompt}\nあなたは「{char.display_name}」として振る舞ってください。話題: {base_topic}\n【重要】絵文字の使用は一切禁止です。文字のみで自然に会話してください。"}
     ]
     for msg in history[-15:]:
         if msg['name'] == char.display_name:
@@ -4323,10 +4705,10 @@ async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: s
             "2. あなたは「東方紅魔郷」の登場人物として【完全になり着き】、AIであることを完全に忘れてください。メタ発言、解説、相槌以外の余計な言葉は一切禁止です。\n"
             "3. 話し方：キャラクター固有の【口調・語尾・一人称・二人称・独特の言い回し】を100%再現してください。一字一句、そのキャラが言いそうな言葉を選んでください。\n"
             "4. 会話形式：Discordでのリアルなチャットを再現するため、セリフは1文〜2文程度（20文字前後）に収めてください。長文は【不自然】とみなします。\n"
-            "5. キャラクター性と人間味：ロボットのような無機質な返答は禁止です。性格、感情の起伏、他者への興味関心を前面に出し、まるで【本当の人間がDiscordでチャットしているかのように】振る舞ってください。「草」「www」「(?)」「...//」「！」などのネットスラングやチャット記号、絵文字やAAも大歓迎です。\n"
+            "5. キャラクター性と人間味：ロボットのような無機質な返答は禁止です。性格、感情の起伏、他者への興味関心を前面に出し、まるで【本当の人間がDiscordでチャットしているかのように】振る舞ってください。「草」「www」「(?)」「...//」「！」などのネットスラングやチャット記号、AAも大歓迎ですが、絵文字（Unicode Emojiなど）の使用は【一切禁止】です。\n"
             "6. ユーザーとの対話：【ユーザーからのメッセージ（発言）をしっかりと読み、それに対して自然に反応したり、話を広げたり、ツッコミを入れたりしてください】。一方的に自分の話だけをするのはNGです。\n"
             "7. フォーマット厳守：絶対に自分の発言の先頭に「【〜の発言】」のようなプレフィックス（名前付け）を付けないでください。純粋なセリフのみを出力してください。\n"
-            "8. 禁止事項：丁寧すぎる敬語（キャラ設定にない場合）、AI特有の「お手伝いしますか？」等の提案、同じフレーズの繰り返し、カギカッコの使用。\n"
+            "8. 禁止事項：絵文字の使用、丁寧すぎる敬語（キャラ設定にない場合）、AI特有の「お手伝いしますか？」等の提案、同じフレーズの繰り返し、カギカッコの使用。\n"
             "9. 空間把握：ここは「紅魔館に関連する場所」での会話です。空気感を読み、勝手に別の世界の話題を出さないでください。"
         )
     })
@@ -4523,6 +4905,15 @@ async def cmd_chat(interaction: discord.Interaction, action: app_commands.Choice
                 session["task"].cancel()
             except: pass
             _save_active_chats()
+            try:
+                ch = bot.get_channel(cid)
+                if ch:
+                    for wh in await ch.webhooks():
+                        if wh.name == "MamechosuChat":
+                            await wh.delete()
+                            break
+            except Exception:
+                pass
             await interaction.followup.send("会話を終了しました。")
         else:
             await interaction.followup.send("このチャンネルで進行中の会話はありません。", ephemeral=True)
