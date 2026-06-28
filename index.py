@@ -35,7 +35,7 @@ def load_env(path="env.txt"):
 env            = load_env()
 TOKEN          = env["TOKEN"]
 OBAMA_GUILD_ID = int(env.get("OBAMA_GUILD_ID", "1385475575023538236"))
-GEMINI_API_KEY = env.get("GEMINI_API_KEY", "")
+GROQ_API_KEY   = env.get("GROQ_API_KEY", "")
 GITHUB_TOKEN   = env.get("GITHUB_TOKEN", "")
 AICHAT_API_KEY = env.get("AICHAT_API_KEY", "")
 
@@ -185,7 +185,7 @@ async def safe_defer(interaction: discord.Interaction, ephemeral=False):
 
 
 # ──────────────────────────────────────────────
-# Gemini ステータス更新 (1分ごと、100/1でえっち喘ぎ声)
+# GROQ ステータス更新 (1分ごと、100/1でえっち喘ぎ声)
 # ──────────────────────────────────────────────
 # えっちステータス（100分の1の確率で表示）
 # update_status は on_ready 内で直接設定するため loop 不要
@@ -492,7 +492,7 @@ HELP_TEXT = {
         "**表示内容:**\n"
         "- CPU使用率 / メモリ使用率（使用量/総量）\n"
         "- ストレージ使用率\n"
-        "- Gemini API状態\n"
+        "- Groq API残りリクエスト数・トークン数\n"
         "- Bot稼働サーバー数"
     ),
     "save": (
@@ -617,17 +617,17 @@ HELP_TEXT = {
         "- `interval_min/max` : 発言間隔の最小・最大（分単位、管理者のみ変更可）\n"
         "**仕様:**\n"
         "- Webhookでキャラ固有アイコン・名前で発言\n"
-        "- Gemini 2.5 Flash でAI応答を生成\n"
+        "- Groq API (LLaMA-3.3-70B) でAI応答を生成\n"
         "- Bot再起動後も自動復旧（永続化）\n"
         "- 一般ユーザーの発言にキャラが反応することがあります"
     ),
     "chat_set_key": (
         "**AIチャット用カスタムAPIキーを設定します（管理者専用）。**\n"
-        "使い方: `/chat_set_key api_key:[Gemini APIキー]`\n"
+        "使い方: `/chat_set_key api_key:[Groq APIキー]`\n"
         "**仕様:**\n"
         "- 設定するとそのサーバーのAIチャットはそのキーを使用\n"
         "- 空で実行するとカスタムキーを削除してデフォルトに戻す\n"
-        "- Gemini APIキーは https://aistudio.google.com/ で発行可能\n"
+        "- Groq APIキーは https://console.groq.com/ で無料発行可能\n"
         "必要権限: サーバー管理権限"
     ),
     "echo": (
@@ -1320,7 +1320,7 @@ class _BtnStopAIChat(discord.ui.Button):
             await i.response.send_message("AIチャットは稼働中ではありません", ephemeral=True)
 
 class AICustomKeyModal(discord.ui.Modal, title="カスタムAPIキー設定"):
-    api_key = discord.ui.TextInput(label="Gemini APIキー", placeholder="AIza...", required=True)
+    api_key = discord.ui.TextInput(label="Groq APIキー", placeholder="gsk_...", required=True)
     def __init__(self, gid):
         super().__init__()
         self.gid = gid
@@ -1963,9 +1963,9 @@ async def on_message(message: discord.Message):
     if rmj_data.get("server", True) or message.channel.id in rmj_data.get("channels", []):
         text = message.content.strip()
         if not text.startswith("!") and re.match(r"^[a-zA-Z0-9\s.,!?'-]+$", text) and re.search(r"[a-zA-Z]", text):
-            # Geminiで翻訳
-            if GEMINI_API_KEY:
-                translated = await _gemini_translate_romaji(text)
+            # GROQで翻訳
+            if GROQ_API_KEY:
+                translated = await _groq_translate_romaji(text)
                 if translated:
                     await message.reply(f"[翻訳]: {translated}")
 
@@ -2403,8 +2403,8 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
 KINSOKU_CHARS = set("、。，．」』ぁぃぅぇぉっゃゅょァィゥェォッャュョ")
 COLS_PER_PAGE = 20
 
-async def _gemini_generate_sakubun(theme: str, length: int) -> str:
-    if not GEMINI_API_KEY: return ""
+async def _groq_generate_sakubun(theme: str, length: int) -> str:
+    if not GROQ_API_KEY: return ""
     prompt = (
         f"あなたは小学生です。\n"
         f"テーマ「{theme}」について、{length}文字程度の作文を書いてください。\n\n"
@@ -2417,10 +2417,10 @@ async def _gemini_generate_sakubun(theme: str, length: int) -> str:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1500,
                     "temperature": 0.6,
@@ -2553,7 +2553,7 @@ async def cmd_sakubun(interaction: discord.Interaction, theme: str, length: int 
     if length > 1600:
         await interaction.followup.send("文字数は1600文字以内で指定してください。")
         return
-    text = await _gemini_generate_sakubun(theme, length)
+    text = await _groq_generate_sakubun(theme, length)
     if not text:
         await interaction.followup.send("作文の生成に失敗しました。")
         return
@@ -2630,12 +2630,12 @@ def build_haiku_image(parts: list[str]) -> Image.Image:
 
     return img
 
-async def _gemini_extract_haiku(text: str) -> list[str] | None:
+async def _groq_extract_haiku(text: str) -> list[str] | None:
     """
-    Geminiを使って文章中の川柳を検出する。
+    GROQを使って文章中の川柳を検出する。
     5-7-5に限定せず、字余り・字足らずも許容する。
     """
-    if not GEMINI_API_KEY:
+    if not GROQ_API_KEY:
         return None
     try:
         prompt = (
@@ -2655,11 +2655,11 @@ async def _gemini_extract_haiku(text: str) -> list[str] | None:
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}",
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 60,
                     "temperature": 0.1,
@@ -2709,11 +2709,11 @@ async def check_haiku(message: discord.Message):
     _haiku_processing.add(message.id)
     try:
         parts = None
-        # Geminiを優先（字余り・字足らず・文章中の検出が得意）
-        if GEMINI_API_KEY and 5 <= len(text) <= 120:
-            parts = await _gemini_extract_haiku(text)
+        # GROQを優先（字余り・字足らず・文章中の検出が得意）
+        if GROQ_API_KEY and 5 <= len(text) <= 120:
+            parts = await _groq_extract_haiku(text)
         else:
-            # Geminiがない場合のみローカル検出
+            # GROQがない場合のみローカル検出
             parts = split_into_phrases(text)
         if parts:
             img = build_haiku_image(parts)
@@ -2789,13 +2789,13 @@ async def build_resource_embed(client: discord.Client) -> discord.Embed:
     embed.add_field(name="Ping",        value=f"{lat} ms", inline=True)
     embed.add_field(name="db/",         value=f"{dsz:.1f} KB", inline=True)
     
-    gl = getattr(client, "_gemini_ratelimit", {})
+    gl = getattr(client, "_groq_ratelimit", {})
     req_rem = gl.get("req_rem", "N/A")
     req_lim = gl.get("req_lim", "N/A")
     tok_rem = gl.get("tok_rem", "N/A")
     tok_lim = gl.get("tok_lim", "N/A")
-    embed.add_field(name="Gemini API", value=f"{req_rem} / {req_lim}", inline=True)
-    embed.add_field(name="Gemini API (Tokens)",   value=f"{tok_rem} / {tok_lim}", inline=True)
+    embed.add_field(name="Groq API", value=f"{req_rem} / {req_lim}", inline=True)
+    embed.add_field(name="Groq API (Tokens)",   value=f"{tok_rem} / {tok_lim}", inline=True)
     return embed
 
 @bot.tree.command(name="resource", description="サーバーのリソース状態を確認します")
@@ -3239,8 +3239,8 @@ LEWD_REPLIES = [
     "んぁっ…すきすきすき…こんなきもちよくするひと…すきになっちゃうよ…♡♡♡",
 ]
 
-async def _gemini_check_lewd(text: str) -> bool:
-    if not GEMINI_API_KEY:
+async def _groq_check_lewd(text: str) -> bool:
+    if not GROQ_API_KEY:
         return any(kw.lower() in text.lower() for kw in LEWD_KEYWORDS)
     try:
         prompt = (
@@ -3257,11 +3257,11 @@ async def _gemini_check_lewd(text: str) -> bool:
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}",
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,
                     "temperature": 0.1,
@@ -3280,7 +3280,7 @@ async def check_lewd(message: discord.Message):
     text = message.content.strip()
     if not text:
         return
-    is_lewd = await _gemini_check_lewd(text)
+    is_lewd = await _groq_check_lewd(text)
     if is_lewd:
         reply_text = random.choice(LEWD_REPLIES)
         # h_flan.png をアイコンにしたWebhookで送信
@@ -4122,7 +4122,7 @@ async def cmd_meigen(interaction: discord.Interaction,
 
     import json as _json
 
-    async def _call_gemini(log_lines: list[str]) -> dict | None:
+    async def _call_groq(log_lines: list[str]) -> dict | None:
         history_text = "\n".join(log_lines)
         system_p = (
             "あなたはDiscordの会話ログから「迷言」を発掘するAIです。\n"
@@ -4138,10 +4138,10 @@ async def cmd_meigen(interaction: discord.Interaction,
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                    headers={"Authorization": f"Bearer {GEMINI_API_KEY}", "Content-Type": "application/json"},
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                     json={
-                        "model": "gemini-2.5-flash",
+                        "model": "llama-3.3-70b-versatile",
                         "messages": [
                             {"role": "system", "content": system_p},
                             {"role": "user",   "content": user_p},
@@ -4167,7 +4167,7 @@ async def cmd_meigen(interaction: discord.Interaction,
     for chunk_start in range(0, min(len(numbered), 1000), chunk_size):
         chunk = numbered[chunk_start:chunk_start + chunk_size]
         log_lines = [f"[{i}] {m['display']}: {m['content'][:100]}" for i, m in enumerate(chunk)]
-        parsed = await _call_gemini(log_lines)
+        parsed = await _call_groq(log_lines)
         if not parsed:
             continue
         idx = parsed.get("index")
@@ -4443,8 +4443,8 @@ async def cmd_globalchat(interaction: discord.Interaction, action: str):
 # ──────────────────────────────────────────────
 ATSUMORI_KEYWORDS = ["熱盛", "あつもり", "アツモリ", "ATSUMORI", "atsumori"]
 
-async def _gemini_check_atsumori(text: str) -> bool:
-    if not GEMINI_API_KEY:
+async def _groq_check_atsumori(text: str) -> bool:
+    if not GROQ_API_KEY:
         return any(w in text for w in ATSUMORI_KEYWORDS)
     try:
         prompt = (
@@ -4460,11 +4460,11 @@ async def _gemini_check_atsumori(text: str) -> bool:
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}",
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,
                     "temperature": 0.3,
@@ -4485,7 +4485,7 @@ async def check_atsumori(message: discord.Message):
     if not text or text.startswith("/") or text.startswith("http"):
         return
 
-    is_real    = await _gemini_check_atsumori(text)
+    is_real    = await _groq_check_atsumori(text)
     # 1%の確率で誤検知（本物ではない場合のみ）
     is_mistake = (not is_real) and (random.random() < 0.01)
 
@@ -4534,7 +4534,7 @@ async def cmd_atsumori(interaction: discord.Interaction,
 # ──────────────────────────────────────────────
 # ローマ字翻訳 (romaji)
 # ──────────────────────────────────────────────
-async def _gemini_translate_romaji(text: str) -> str:
+async def _groq_translate_romaji(text: str) -> str:
     try:
         system_prompt = (
             "あなたはローマ字（ヘボン式・訓令式・口語混じり）を自然な日本語に変換するエキスパートです。"
@@ -4550,11 +4550,11 @@ async def _gemini_translate_romaji(text: str) -> str:
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={"Authorization": f"Bearer {GEMINI_API_KEY}",
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": user_prompt},
@@ -4722,7 +4722,7 @@ async def cmd_impersonateset(interaction: discord.Interaction,
     await interaction.followup.send(msg, ephemeral=True)
 
 # ──────────────────────────────────────────────
-# 22. AIチャット /chat (Gemini + Webhook)
+# 22. AIチャット /chat (Groq + Webhook)
 # ──────────────────────────────────────────────
 import asyncio
 import aiohttp
@@ -4783,16 +4783,23 @@ async def task_save_active_chats():
 
 if not hasattr(bot, "_active_chats"):
     bot._active_chats = {}
-if not hasattr(bot, "_gemini_ratelimit"):
-    bot._gemini_ratelimit = {"req_rem": "N/A", "req_lim": "N/A", "tok_rem": "N/A", "tok_lim": "N/A"}
+if not hasattr(bot, "_groq_ratelimit"):
+    bot._groq_ratelimit = {"req_rem": "N/A", "req_lim": "N/A", "tok_rem": "N/A", "tok_lim": "N/A"}
 
-async def _gemini_chat_reply(char: CharacterSettings, history: list, base_topic: str, channel_id: int = None, guild_id: int = None) -> str:
-    # サーバーごとに設定されたGemini APIキーのみ使用（未設定は動作しない）
-    api_key = None
+async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: str, channel_id: int = None, guild_id: int = None) -> str:
+    # カスタムAPIキーの決定
+    api_key = GROQ_API_KEY
     if guild_id:
         settings = db_read("aichat_settings", str(guild_id))
         if isinstance(settings, dict):
-            api_key = settings.get("custom_api_key") or None
+            custom_key = settings.get("custom_api_key")
+            if custom_key:
+                api_key = custom_key
+            elif AICHAT_API_KEY:
+                api_key = AICHAT_API_KEY
+    elif AICHAT_API_KEY:
+        api_key = AICHAT_API_KEY
+        
     if not api_key:
         return ""
     
@@ -4830,17 +4837,22 @@ async def _gemini_chat_reply(char: CharacterSettings, history: list, base_topic:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
-                    "model": "gemini-2.5-flash",
+                    "model": "llama-3.3-70b-versatile",
                     "messages": messages,
                     "temperature": 0.9,
                     "max_tokens": 150,
                 },
                 timeout=15
             ) as res:
-
+                bot._groq_ratelimit = {
+                    "req_rem": res.headers.get("x-ratelimit-remaining-requests", "N/A"),
+                    "req_lim": res.headers.get("x-ratelimit-limit-requests", "N/A"),
+                    "tok_rem": res.headers.get("x-ratelimit-remaining-tokens", "N/A"),
+                    "tok_lim": res.headers.get("x-ratelimit-limit-tokens", "N/A")
+                }
                 if res.status == 200:
                     data = await res.json()
                     raw = data["choices"][0]["message"]["content"].strip()
@@ -4856,7 +4868,7 @@ async def _gemini_chat_reply(char: CharacterSettings, history: list, base_topic:
                     err_text = await res.text()
                     if channel_id:
                         ch = bot.get_channel(channel_id)
-                        if ch: await ch.send(f"[警告] Gemini API Error ({res.status}): `{err_text[:100]}`", delete_after=10)
+                        if ch: await ch.send(f"[警告] Groq API Error ({res.status}): `{err_text[:100]}`", delete_after=10)
     except Exception as e:
         if channel_id:
             ch = bot.get_channel(channel_id)
@@ -4901,7 +4913,7 @@ async def _chat_loop(channel_id: int):
         
         speaker = random.choices(chars, weights=weights, k=1)[0]
         
-        reply = await _gemini_chat_reply(speaker, history, context_topic, channel_id=channel_id, guild_id=channel.guild.id)
+        reply = await _groq_chat_reply(speaker, history, context_topic, channel_id=channel_id, guild_id=channel.guild.id)
         if reply:
             history.append({"name": speaker.display_name, "content": reply})
             if len(history) > 20: history.pop(0)
@@ -4924,8 +4936,8 @@ async def _chat_loop(channel_id: int):
         wait_seconds = random.uniform(interval_min * 60.0, interval_max * 60.0)
         await asyncio.sleep(wait_seconds)
 
-@bot.tree.command(name="chat_set_key", description="AIチャット用のGemini APIキーを設定します（管理者専用・設定しないとAIチャットは動作しません）")
-@app_commands.describe(api_key="設定するGemini APIキー（空の場合は削除）")
+@bot.tree.command(name="chat_set_key", description="AIチャット用のGroq APIキーを設定します（管理者専用・設定しないとAIチャットは動作しません）")
+@app_commands.describe(api_key="設定するGroq APIキー（空の場合は削除）")
 @app_commands.default_permissions(manage_guild=True)
 async def cmd_chat_set_key(interaction: discord.Interaction, api_key: str = None):
     await safe_defer(interaction, ephemeral=True)
