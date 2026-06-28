@@ -1871,11 +1871,18 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
         
-    # miq トリガー
-    if message.reference and message.reference.message_id and "miq" in message.content.lower() and bot.user in message.mentions:
+    # miq / miqc トリガー（返信メッセージへのメンション）
+    msg_lower = message.content.lower()
+    _miq_trigger = (
+        message.reference and message.reference.message_id
+        and bot.user in message.mentions
+        and ("miq" in msg_lower)
+    )
+    if _miq_trigger:
         try:
             target_msg = await message.channel.fetch_message(message.reference.message_id)
             if target_msg.content:
+                use_color = "miqc" in msg_lower
                 avatar_bytes = b""
                 try:
                     if target_msg.author.display_avatar:
@@ -1884,9 +1891,47 @@ async def on_message(message: discord.Message):
                                 if resp.status == 200:
                                     avatar_bytes = await resp.read()
                 except: pass
-                img_file = await _make_quote_file(target_msg.content, target_msg.author.display_name, avatar_bytes, guild=message.guild, username=target_msg.author.name)
+                img_file = await _make_quote_file(
+                    target_msg.content, target_msg.author.display_name, avatar_bytes,
+                    guild=message.guild, username=target_msg.author.name, color=use_color
+                )
                 await message.reply(file=img_file)
                 return
+        except Exception:
+            pass
+
+    # quote画像への返信で color/c → カラー化, gray/g → グレー化
+    _recolor_kw = msg_lower.strip()
+    if (message.reference and message.reference.message_id
+            and _recolor_kw in ("color", "c", "gray", "grey", "g")):
+        try:
+            ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            # botが送ったメッセージで添付画像がある場合
+            if ref_msg.author == bot.user and ref_msg.attachments:
+                # 元のquoteを再生成するために必要な情報をembedまたはファイル名から取れないので、
+                # 代わりに ref_msg の参照先を辿って元の発言者を特定する
+                src_msg = None
+                if ref_msg.reference and ref_msg.reference.message_id:
+                    try:
+                        src_msg = await message.channel.fetch_message(ref_msg.reference.message_id)
+                    except Exception:
+                        pass
+                if src_msg and src_msg.content:
+                    use_color = _recolor_kw in ("color", "c")
+                    avatar_bytes = b""
+                    try:
+                        if src_msg.author.display_avatar:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(src_msg.author.display_avatar.url) as resp:
+                                    if resp.status == 200:
+                                        avatar_bytes = await resp.read()
+                    except: pass
+                    img_file = await _make_quote_file(
+                        src_msg.content, src_msg.author.display_name, avatar_bytes,
+                        guild=message.guild, username=src_msg.author.name, color=use_color
+                    )
+                    await message.reply(file=img_file)
+                    return
         except Exception:
             pass
 
@@ -2228,48 +2273,67 @@ def count_mora(text: str) -> int:
             count += 1
     return count
 
+def _try_haiku_match(candidate: str) -> list[str] | None:
+    """候補文字列から5-7-5 or 5-5-7パターンを探す（±1字余り許容）"""
+    clean = re.sub(r"[\s　、。,.・/\n！!？?～~「」『』【】【】\(\)（）]", "", candidate)
+    if len(clean) < 5:
+        return None
+    n     = len(clean)
+    total = count_mora(clean)
+    if not (13 <= total <= 21):
+        return None
+    # 5-7-5 または 5-5-7 を ±1 で探索
+    for p1_target, p2_target, p3_target in [(5,7,5),(5,5,7)]:
+        for i in range(2, n - 2):
+            m1 = count_mora(clean[:i])
+            if not (p1_target - 1 <= m1 <= p1_target + 1):
+                continue
+            for j in range(i + 2, n):
+                m2 = count_mora(clean[i:j])
+                if m2 > p2_target + 2:
+                    break
+                if p2_target - 1 <= m2 <= p2_target + 1:
+                    m3 = count_mora(clean[j:])
+                    if p3_target - 1 <= m3 <= p3_target + 1:
+                        return [clean[:i], clean[i:j], clean[j:]]
+    return None
+
 def split_into_phrases(text: str) -> list[str] | None:
     """
-    川柳の3フレーズを検出する。
-    字余り・字足らずも許容する。
-    - 区切り文字があれば3分割を試みる
-    - なければ5-7-5±1モーラの範囲で全探索
+    川柳/俳句の3フレーズを検出する。
+    - 長いメッセージの中からも探せる（文章をスライディングウィンドウで検索）
+    - 区切り文字で明示的に3分割されている場合を最優先
+    - 5-7-5 と 5-5-7 どちらも検出
+    - ±1字余り・字足らず許容
     """
     stripped = text.strip()
     if stripped.startswith("http"):
         return None
-    if len(stripped) > 60 or len(stripped) < 5:
+    if len(stripped) < 5:
         return None
 
-    # 1) 区切り文字で3分割できる場合
+    # 1) 区切り文字で3分割できる場合（最優先）
     parts = re.split(r"[\s　、。,.・/\n！!？?～~]+", stripped)
-    parts = [p for p in parts if p]
+    parts = [p for p in parts if p.strip()]
     if len(parts) == 3:
-        # 各フレーズが2〜9モーラなら川柳として扱う（字余り・字足らず許容）
         moras = [count_mora(p) for p in parts]
-        if all(2 <= m <= 9 for m in moras):
-            return parts
+        targets = [(5,7,5),(5,5,7)]
+        for p1t,p2t,p3t in targets:
+            if (p1t-1 <= moras[0] <= p1t+1 and
+                p2t-1 <= moras[1] <= p2t+1 and
+                p3t-1 <= moras[2] <= p3t+1):
+                return parts
 
-    # 2) 区切りなし: 4〜6 / 5〜9 / 4〜6 の範囲で全探索（緩い制約）
-    clean = re.sub(r"[\s　、。,.・/\n！!？?～~]", "", stripped)
-    n     = len(clean)
-    total = count_mora(clean)
-    # 合計モーラが11〜21の範囲にあるものだけ対象
-    if not (11 <= total <= 21):
-        return None
-    for i in range(2, n-2):
-        m1 = count_mora(clean[:i])
-        if not (4 <= m1 <= 6):
-            continue
-        for j in range(i+2, n):
-            m2 = count_mora(clean[i:j])
-            if m2 > 9:
-                break
-            if 5 <= m2 <= 9:
-                m3 = count_mora(clean[j:])
-                if 4 <= m3 <= 6:
-                    return [clean[:i], clean[i:j], clean[j:]]
-    return None
+    # 2) テキスト全体または文章中のウィンドウで探索
+    # 句読点・改行で文を分割してから各文を検索
+    sentences = re.split(r"[。\n！？!?]", stripped)
+    for sent in sentences:
+        result = _try_haiku_match(sent)
+        if result:
+            return result
+
+    # 3) 元のテキスト全体でも試す（句読点なしの場合）
+    return _try_haiku_match(stripped)
 
 # フォントキャッシュ（パス検索を1回だけ行う）
 _FONT_PATH_CACHE: str | None = None
@@ -3710,7 +3774,7 @@ _EMOJI_PATTERN = _re_md.compile(
 )
 
 def _clean_markdown_only(text: str) -> str:
-    """Discordマークダウン記号のみ除去。絵文字(Unicode)は残す。カスタム絵文字はそのまま保持。"""
+    """Discordマークダウン記号のみ除去。絵文字（Unicode・カスタム）はそのまま保持。"""
     text = _re_md.sub(r"```[\s\S]*?```", "", text)
     text = _re_md.sub(r"`[^`]*`", "", text)
     text = _re_md.sub(r"^#{1,6}\s+", "", text, flags=_re_md.MULTILINE)
@@ -3830,7 +3894,7 @@ def _wrap_mixed(text: str, font, emoji_size: int, max_width: int) -> list:
 
 def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"",
                       theme_name: str = "dark", emoji_images: dict = None,
-                      username: str = "") -> Image.Image:
+                      username: str = "", color: bool = False) -> Image.Image:
     if emoji_images is None:
         emoji_images = {}
     text = _clean_markdown_only(text) or " "
@@ -3840,7 +3904,6 @@ def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"
     FG     = (245, 245, 245)
     SUB    = (130, 130, 130)
     ACCENT = (220, 220, 220)
-    TINY   = (60, 60, 60)
     SEP    = (38, 38, 38)
 
     font_paths = [
@@ -3859,34 +3922,40 @@ def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"
     img  = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    # ── 左: アバター（グレースケール + 右フェード）──────────
+    # ── 左: アバター（縦full + 右フェード / グレーorカラー）─
     AV_W = int(W * 0.40)
     has_avatar = False
     if avatar_bytes:
         try:
             av = Image.open(BytesIO(avatar_bytes)).convert("RGBA")
             aw, ah = av.size
-            s = min(aw, ah)
-            av = av.crop(((aw-s)//2, (ah-s)//2, (aw+s)//2, (ah+s)//2))
-            av = av.resize((AV_W, H), Image.Resampling.LANCZOS)
-            av_gray = av.convert("L")
+            # 縦をHに合わせてcoverスケール、横は中央クロップ
+            scale = H / ah
+            new_w = int(aw * scale)
+            av = av.resize((max(new_w, AV_W), H), Image.Resampling.LANCZOS)
+            nw, nh = av.size
+            av = av.crop(((nw - AV_W) // 2, 0, (nw - AV_W) // 2 + AV_W, H))
 
-            # 右端に向かって黒へ線形フェード（60%→100%の範囲）
+            if color:
+                av_base = av.convert("RGB")
+            else:
+                av_base = av.convert("L").convert("RGB")
+
+            # 右端フェード (58%→100%)
             fade = Image.new("L", (AV_W, H), 255)
             fade_start = int(AV_W * 0.58)
-            for x in range(fade_start, AV_W):
-                t = (x - fade_start) / (AV_W - fade_start)
-                # ease-in で急速に暗くする
-                alpha = int(255 * (1 - t ** 1.4))
-                ImageDraw.Draw(fade).line([(x, 0), (x, H)], fill=max(0, alpha))
+            fd = ImageDraw.Draw(fade)
+            for fx in range(fade_start, AV_W):
+                t = (fx - fade_start) / (AV_W - fade_start)
+                fd.line([(fx, 0), (fx, H)], fill=max(0, int(255 * (1 - t ** 1.4))))
 
             from PIL import ImageChops as _IC
             blended = Image.composite(
-                Image.new("L", (AV_W, H), 0),
-                av_gray,
+                Image.new("RGB", (AV_W, H), BG),
+                av_base,
                 _IC.invert(fade)
             )
-            img.paste(blended.convert("RGB"), (0, 0))
+            img.paste(blended, (0, 0))
             has_avatar = True
         except Exception:
             pass
@@ -3978,18 +4047,15 @@ def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"
     if username:
         draw.text((cx, ay), f"@{username}", font=username_font, fill=SUB, anchor="mt")
 
-    # ── 左下: ウォーターマーク ───────────────────────────
-    wm_font = load_font(15)
-    draw.text((18, H - 18), "Make it a Quote", font=wm_font, fill=TINY, anchor="lb")
-
     return img
 
 async def _make_quote_file(text: str, author_name: str, avatar_bytes: bytes = b"",
                            theme_name: str = "dark", guild: "discord.Guild | None" = None,
-                           username: str = "") -> discord.File:
+                           username: str = "", color: bool = False) -> discord.File:
     emoji_images = await _fetch_emoji_images(text, guild=guild)
     img = build_quote_image(text, author_name, avatar_bytes,
-                            theme_name=theme_name, emoji_images=emoji_images, username=username)
+                            theme_name=theme_name, emoji_images=emoji_images, username=username,
+                            color=color)
     buf = BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -3997,8 +4063,10 @@ async def _make_quote_file(text: str, author_name: str, avatar_bytes: bytes = b"
 
 @bot.tree.command(name="quote", description="名言カード画像を生成します")
 @app_commands.describe(text="名言の本文（200文字以内）", author="著者名（省略可）",
-                       theme="dark/light/blue/green/red（デフォルト:dark）")
-async def cmd_quote(interaction: discord.Interaction, text: str, author: str = "", theme: str = "dark"):
+                       theme="dark/light/blue/green/red（デフォルト:dark）",
+                       color="アイコンをカラーで表示するか（デフォルト:グレー）")
+async def cmd_quote(interaction: discord.Interaction, text: str, author: str = "",
+                    theme: str = "dark", color: bool = False):
     await safe_defer(interaction)
     if len(text) > 200:
         await interaction.followup.send("200文字以内で入力してください。", ephemeral=True); return
@@ -4014,26 +4082,35 @@ async def cmd_quote(interaction: discord.Interaction, text: str, author: str = "
         except: pass
 
     uname = interaction.user.name if not author else ""
-    file = await _make_quote_file(text, author_name, avatar_bytes, theme_name=theme, guild=interaction.guild, username=uname)
+    file = await _make_quote_file(text, author_name, avatar_bytes, theme_name=theme, guild=interaction.guild, username=uname, color=color)
     await interaction.followup.send(file=file)
 
-@bot.tree.command(name="meigen", description="過去150件の会話からAIが迷言を1つ選び、名言カード画像を生成します")
-async def cmd_meigen(interaction: discord.Interaction):
+@bot.tree.command(name="meigen", description="過去最大1000件のメッセージからAIが迷言を選び、名言カード画像を生成します")
+@app_commands.describe(channel="検索するチャンネル（省略=現在のチャンネル）")
+async def cmd_meigen(interaction: discord.Interaction,
+                     channel: discord.TextChannel = None):
     await safe_defer(interaction)
     if not interaction.guild:
         await interaction.followup.send("サーバー内でのみ使用できます。", ephemeral=True); return
 
-    # 実在するメッセージを最大1000件収集（内容・著者・member objectを保持）
+    target_ch = channel or interaction.channel
+
+    # 実在するメッセージを最大1000件収集
     raw_msgs = []
     try:
-        async for msg in interaction.channel.history(limit=1000):
+        async for msg in target_ch.history(limit=1000):
             if msg.author.bot or not msg.content.strip():
+                continue
+            # URLのみ・コマンドのみは除外
+            c = msg.content.strip()
+            if c.startswith("/") or c.startswith("http"):
                 continue
             raw_msgs.append({
                 "display": msg.author.display_name,
-                "name": msg.author.name,
-                "content": msg.content.strip(),
-                "member": interaction.guild.get_member(msg.author.id),
+                "name":    msg.author.name,
+                "content": c,
+                "member":  interaction.guild.get_member(msg.author.id),
+                "id":      msg.id,
             })
     except Exception as e:
         await interaction.followup.send(f"履歴取得エラー: {e}", ephemeral=True); return
@@ -4041,52 +4118,83 @@ async def cmd_meigen(interaction: discord.Interaction):
     if len(raw_msgs) < 3:
         await interaction.followup.send("会話履歴が少なすぎます。", ephemeral=True); return
 
-    # AIに渡す番号付きログ（古い順）
     numbered = list(reversed(raw_msgs))
-    log_lines = [f"[{i}] {m['display']}: {m['content'][:120]}" for i, m in enumerate(numbered)]
-    history_text = "\n".join(log_lines)
 
-    prompt = (
-        "以下はDiscordチャンネルの会話ログです（番号付き）。\n"
-        "この中から最も面白い・印象的・迷言っぽい発言を1つ選んでください。\n"
-        "必ずログに存在する番号を選んでください。\n\n"
-        "【出力形式】以下のJSON形式のみで出力してください。説明文は不要です。\n"
-        '{"index": 番号, "text": "発言の内容（原文のまま）", "author": "発言者の名前"}\n\n'
-        f"会話ログ:\n{history_text}"
-    )
+    import json as _json
 
-    selected_text, selected_author, selected_member = "", "", None
-    try:
-        import json as _json
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 300,
-                    "temperature": 0.7,
-                },
-                timeout=aiohttp.ClientTimeout(total=25),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    raw = data["choices"][0]["message"]["content"].strip()
-                    raw_clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-                    parsed = _json.loads(raw_clean)
-                    idx = parsed.get("index")
-                    if idx is not None and 0 <= int(idx) < len(numbered):
-                        entry = numbered[int(idx)]
-                        selected_text   = entry["content"]
-                        selected_author = entry["display"]
-                        selected_member = entry["member"]
-                    else:
-                        selected_text   = parsed.get("text", "").strip()
-                        selected_author = parsed.get("author", "").strip()
-                        selected_member = interaction.guild.get_member_named(selected_author) if selected_author else None
-    except Exception as e:
-        await interaction.followup.send(f"AI処理エラー: {e}", ephemeral=True); return
+    async def _call_groq(log_lines: list[str]) -> dict | None:
+        history_text = "\n".join(log_lines)
+        system_p = (
+            "あなたはDiscordの会話ログから「迷言」を発掘するAIです。\n"
+            "迷言とは：面白い・ズレてる・哲学っぽい・笑える・思わず二度見するような発言のことです。\n"
+            "必ずログの中から1件選んでください。選べない理由は存在しません。\n"
+            "出力はJSON形式のみ。前置き・説明・```は不要です。"
+        )
+        user_p = (
+            "以下の会話ログから最も迷言らしい発言を1つ選び、JSONで返してください。\n"
+            "形式: {\"index\": 番号, \"text\": \"発言内容（原文のまま）\", \"author\": \"発言者名\"}\n\n"
+            f"会話ログ:\n{history_text}"
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": system_p},
+                            {"role": "user",   "content": user_p},
+                        ],
+                        "max_tokens": 200,
+                        "temperature": 0.8,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        raw = data["choices"][0]["message"]["content"].strip()
+                        raw_clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
+                        return _json.loads(raw_clean)
+        except Exception:
+            pass
+        return None
+
+    # 1000件を超える場合は分割して試みる（最大2チャンク）
+    chunk_size = 500
+    selected_text, selected_author, selected_member, selected_msg_id = "", "", None, None
+
+    for chunk_start in range(0, min(len(numbered), 1000), chunk_size):
+        chunk = numbered[chunk_start:chunk_start + chunk_size]
+        log_lines = [f"[{i}] {m['display']}: {m['content'][:100]}" for i, m in enumerate(chunk)]
+        parsed = await _call_groq(log_lines)
+        if not parsed:
+            continue
+        idx = parsed.get("index")
+        if idx is not None:
+            try:
+                idx = int(idx)
+            except Exception:
+                idx = None
+        if idx is not None and 0 <= idx < len(chunk):
+            entry = chunk[idx]
+            selected_text   = entry["content"]
+            selected_author = entry["display"]
+            selected_member = entry["member"]
+            selected_msg_id = entry["id"]
+            break
+        # indexが外れた場合はtextで照合
+        txt = parsed.get("text", "").strip()
+        if txt:
+            for entry in chunk:
+                if entry["content"][:50] == txt[:50]:
+                    selected_text   = entry["content"]
+                    selected_author = entry["display"]
+                    selected_member = entry["member"]
+                    selected_msg_id = entry["id"]
+                    break
+            if selected_text:
+                break
 
     if not selected_text:
         await interaction.followup.send("迷言が見つかりませんでした。", ephemeral=True); return
@@ -4103,7 +4211,11 @@ async def cmd_meigen(interaction: discord.Interaction):
     uname = selected_member.name if selected_member else ""
     file = await _make_quote_file(selected_text, selected_author or "不明", avatar_bytes,
                                   guild=interaction.guild, username=uname)
-    await interaction.followup.send(file=file)
+
+    # メッセージ直リンク
+    link = f"https://discord.com/channels/{interaction.guild.id}/{target_ch.id}/{selected_msg_id}" if selected_msg_id else ""
+    content = link if link else None
+    await interaction.followup.send(content=content, file=file)
 
 def _wrap_text(text: str, font, max_width: int) -> list[str]:
     """テキストをmax_widthに収まるように折り返す。改行文字も尊重する。"""
@@ -4424,13 +4536,17 @@ async def cmd_atsumori(interaction: discord.Interaction,
 # ──────────────────────────────────────────────
 async def _groq_translate_romaji(text: str) -> str:
     try:
-        prompt = (
-            "あなたはローマ字で入力された日本語のメッセージを、自然な日本語（漢字・ひらがな・カタカナを適切に使用）に翻訳するアシスタントです。\n"
-            "以下のローマ字テキストを日本語に翻訳してください。\n"
-            "【ルール】\n"
-            "- 結果の日本語の文章のみを返してください（解説や余計な言葉は一切不要です）。\n"
-            "- 意味が不明な場合や完全に英語の場合は、そのままか自然な意訳にしてください。\n\n"
-            f"ローマ字テキスト: 「{text}」"
+        system_prompt = (
+            "あなたはローマ字（ヘボン式・訓令式・口語混じり）を自然な日本語に変換するエキスパートです。"
+            "出力は変換結果の日本語テキストだけにしてください。前置き・説明・括弧書き・英語訳は一切不要です。"
+        )
+        user_prompt = (
+            f"次のローマ字を自然な日本語に変換してください。\n"
+            "・漢字・ひらがな・カタカナを文脈に合わせて使い分けてください。\n"
+            "・スラング・略語・数字混じりも口語的に自然に変換してください。\n"
+            "・英語がそのまま使われている単語（例: PC、SNS）はカタカナまたはそのままにしてください。\n"
+            "・変換結果だけを返してください。\n\n"
+            f"ローマ字: {text}"
         )
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -4438,16 +4554,21 @@ async def _groq_translate_romaji(text: str) -> str:
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 100,
-                    "temperature": 0.2,
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    "max_tokens": 150,
+                    "temperature": 0.1,
                 },
-                timeout=aiohttp.ClientTimeout(total=5),
+                timeout=aiohttp.ClientTimeout(total=8),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return data["choices"][0]["message"]["content"].strip()
+                    result = data["choices"][0]["message"]["content"].strip()
+                    result = result.strip("「」『』\"'")
+                    return result if result else None
     except Exception:
         pass
     return None
