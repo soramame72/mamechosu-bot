@@ -698,7 +698,50 @@ HELP_TEXT = {
         "**ローマ字翻訳機能のON/OFFを設定します。**\n"
         "使い方: `/romaji scope:[channel/server] state:[ON/OFF] channel:[対象]`\n"
         "必要権限: チャンネル管理権限"
-    )
+    ),
+    "rolepanel": (
+        "**リアクション絵文字でロールを付与/剥奈できるパネルを作成します。**\n"
+        "使い方: `/rolepanel roles_and_emojis:[絵文字:ロール...] title:[タイトル] password:[パスワード(任意)]`\n"
+        "**入力例:** `🍎:@Member, 🍇:@Gamer`\n"
+        "**仕様:**\n"
+        "- リアクションを押すと即座にロールが付与（再度押すと剥奈）\n"
+        "- 自分のリアクションは即座に消去される\n"
+        "- パスワード付きの場合はDMにボタンが届きそこから入力\n"
+        "必要権限: ロール管理権限"
+    ),
+    "meigen": (
+        "**過去のメッセージからAIが名言/迷言を発掘し、名言カード画像を生成します。**\n"
+        "使い方: `/meigen quote_type:[迷言/名言] channel:[チャンネル]`\n"
+        "**オプション:**\n"
+        "- `quote_type` : 迷言（面白い発言）または名言（良い発言）を選択\n"
+        "- `channel` : 検索対象チャンネル（省略すると現在のチャンネル）\n"
+        "**仕様:**\n"
+        "- 過去1000件のメッセージからランダムに100件サンプリング\n"
+        "- Groq AI（LLaMA-3.3-70B）が該当発言を選出\n"
+        "- 選出結果は画像カードとメッセージリンク付きで送信\n"
+        "- Groq APIが利用不可な場合はランダムフォールバック"
+    ),
+    "sakubun": (
+        "**指定したテーマと文字数でAIが作文を書き、原稿用紙画像として出力します。**\n"
+        "使い方: `/sakubun theme:[テーマ] length:[文字数]`\n"
+        "**オプション:**\n"
+        "- `theme` : 作文のテーマ（必須）\n"
+        "- `length` : 第1型200/400/600字から選択\n"
+        "**仕様:**\n"
+        "- Groq AIで作文を生成\n"
+        "- 原稿用紙デザインの画像として出力"
+    ),
+    "letterreact": (
+        "**指定したメッセージに文字の絵文字でリアクションします。**\n"
+        "使い方: `/letterreact message_id:[メッセージID] text:[文字]`\n"
+        "**対応文字:**\n"
+        "- A～Z / a～z → 🆬～🇿 (地域指示絵文字)\n"
+        "- 0～9 → 0️⃣～9️⃣ (キーキャップ数字)\n"
+        "- `! ? + -` など一部記号\n"
+        "**仕様:**\n"
+        "- 同じ文字が重複する場合は最初の1件のみリアクション（Discordの仕様）\n"
+        "必要権限: メッセージ管理権限"
+    ),
 }
 
 @bot.tree.command(name="help", description="各コマンドの使い方を表示します")
@@ -1029,25 +1072,53 @@ class VerifySetModal(discord.ui.Modal, title="認証パネル作成"):
         except Exception as e:
             await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
 
+def parse_roles_and_emojis(guild, text: str):
+    mapping = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part or ":" not in part: continue
+        emoji_str, role_str = part.split(":", 1)
+        emoji_str = emoji_str.strip()
+        role_str = role_str.strip()
+        
+        m = re.search(r"<@&(\d+)>", role_str)
+        if m: role_id = int(m.group(1))
+        elif role_str.isdigit(): role_id = int(role_str)
+        else: continue
+            
+        role = guild.get_role(role_id)
+        if role:
+            mapping[emoji_str] = role.id
+    return mapping
+
 class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
-    roles_input = discord.ui.TextInput(label="ロールIDをカンマ区切りで入力",
-                                        placeholder="123456789, 987654321")
+    roles_input = discord.ui.TextInput(label="絵文字:ロールID をカンマ区切りで入力",
+                                        placeholder="🍎:123456789, 🍇:987654321")
     panel_title = discord.ui.TextInput(label="パネルタイトル", default="ロールパネル")
     password    = discord.ui.TextInput(label="パスワード（省略可）", required=False)
+    
     def __init__(self, guild_id, channel_id): super().__init__(); self.gid = guild_id; self.cid = channel_id
+    
     async def on_submit(self, interaction):
         try:
-            ch    = interaction.guild.get_channel(self.cid)
-            ids   = [s.strip() for s in self.roles_input.value.split(",") if s.strip()]
-            roles = [interaction.guild.get_role(int(r)) for r in ids if r.isdigit()]
-            roles = [r for r in roles if r]
-            if not roles:
-                await interaction.response.send_message("有効なロールが見つかりません。", ephemeral=True); return
-            pw    = self.password.value.strip() or None
+            guild = interaction.guild
+            ch = guild.get_channel(self.cid)
+            mapping = parse_roles_and_emojis(guild, self.roles_input.value)
+            
+            if not mapping:
+                await interaction.response.send_message("有効な「絵文字:ロール」のペアが見つかりません。", ephemeral=True); return
+                
+            pw = self.password.value.strip() or None
             embed = discord.Embed(title=self.panel_title.value,
-                description="ボタンでロールを取得/解除できます。", color=0x5865F2)
-            if pw: embed.set_footer(text="このパネルはパスワード保護されています")
-            await ch.send(embed=embed, view=RolePanelView(roles, pw))
+                                  description="リアクションを押すことでロールを取得/解除できます。", color=0x5865F2)
+            if pw: embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
+            
+            msg = await ch.send(embed=embed)
+            for emoji_str in mapping.keys():
+                try: await msg.add_reaction(emoji_str)
+                except Exception: pass
+                
+            db_write("reaction_roles", {"guild_id": guild.id, "roles": mapping, "password": pw}, shared=str(msg.id))
             await interaction.response.send_message("ロールパネルを作成しました。", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
@@ -1609,93 +1680,78 @@ async def cmd_cp(interaction: discord.Interaction):
     embed = view._make_embed()
     await interaction.followup.send(embed=embed, view=view)
 
-
-
 # ──────────────────────────────────────────────
-# 5. ロールパネル
+# 5. ロールパネル（リアクション式）
 # ──────────────────────────────────────────────
-class RoleButton(discord.ui.Button):
-    def __init__(self, role: discord.Role, password: str = None):
-        super().__init__(label=role.name, style=discord.ButtonStyle.success, custom_id=f"role_{role.id}")
-        self.role_id  = role.id
-        self.password = password
-
-    async def callback(self, interaction: discord.Interaction):
-        if self.password:
-            await interaction.response.send_modal(PasswordModal(self.role_id, self.password))
-        else:
-            await _toggle_role(interaction, self.role_id)
-
-class PasswordModal(discord.ui.Modal, title="パスワード入力"):
+class DMPasswordModal(discord.ui.Modal, title="パスワード入力"):
     pw = discord.ui.TextInput(label="パスワード", required=True)
-    def __init__(self, role_id: int, correct_pw: str):
+    def __init__(self, guild_id: int, role_id: int, correct_pw: str):
         super().__init__()
-        self.role_id    = role_id
+        self.guild_id = guild_id
+        self.role_id = role_id
         self.correct_pw = correct_pw
     async def on_submit(self, interaction: discord.Interaction):
-        # 試行回数チェック (3回失敗で60秒ロック)
+        guild = bot.get_guild(self.guild_id)
+        if not guild:
+            await interaction.response.send_message("サーバーが見つかりません。", ephemeral=True); return
+        member = guild.get_member(interaction.user.id)
+        if not member:
+            await interaction.response.send_message("サーバーに参加していません。", ephemeral=True); return
         if not _check_password_attempt(interaction.user.id, self.role_id):
-            await interaction.response.send_message(
-                "試行回数が多すぎます。60秒後に再試行してください。", ephemeral=True)
-            return
+            await interaction.response.send_message("試行回数が多すぎます。60秒後に再試行してください。", ephemeral=True); return
         if self.pw.value == self.correct_pw:
             _clear_password_attempt(interaction.user.id, self.role_id)
-            await _toggle_role(interaction, self.role_id)
+            role = guild.get_role(self.role_id)
+            if role:
+                try:
+                    if role in member.roles:
+                        await member.remove_roles(role)
+                        await interaction.response.send_message(f"サーバー「{guild.name}」で {role.name} を外しました。", ephemeral=True)
+                    else:
+                        await member.add_roles(role)
+                        await interaction.response.send_message(f"サーバー「{guild.name}」で {role.name} を付与しました。", ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message("ロールが見つかりません。", ephemeral=True)
         else:
-            await interaction.response.send_message(
-                "パスワードが違います。", ephemeral=True)
+            await interaction.response.send_message("パスワードが違います。", ephemeral=True)
 
-async def _toggle_role(interaction: discord.Interaction, role_id: int):
-    role = interaction.guild.get_role(role_id)
-    if not role:
-        await interaction.response.send_message("ロールが見つかりません。", ephemeral=True)
-        return
-    # Botのロールより上位かチェック
-    if role >= interaction.guild.me.top_role:
-        await interaction.response.send_message(
-            f"Botのロール ({interaction.guild.me.top_role.name}) より上位のロールは操作できません。", ephemeral=True)
-        return
-    member = interaction.user
-    try:
-        if role in member.roles:
-            await member.remove_roles(role)
-            await interaction.response.send_message(f"{role.name} を外しました。", ephemeral=True)
-        else:
-            await member.add_roles(role)
-            await interaction.response.send_message(f"{role.name} を付与しました。", ephemeral=True)
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            "権限エラー: BotのロールをDiscordの設定でより上位に移動してください。", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
-
-class RolePanelView(discord.ui.View):
-    def __init__(self, roles: list, password: str = None):
-        super().__init__(timeout=None)
-        for role in roles:
-            self.add_item(RoleButton(role, password))
+class DMPasswordView(discord.ui.View):
+    def __init__(self, guild_id: int, role_id: int, correct_pw: str):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.role_id = role_id
+        self.correct_pw = correct_pw
+        
+    @discord.ui.button(label="パスワードを入力", style=discord.ButtonStyle.primary)
+    async def btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(DMPasswordModal(self.guild_id, self.role_id, self.correct_pw))
 
 @bot.tree.command(name="rolepanel", description="ロールパネルを作成します")
-@app_commands.describe(roles="ロールをメンション形式でカンマ区切り", title="タイトル", password="パスワード（省略可）")
-async def cmd_rolepanel(interaction: discord.Interaction, roles: str, title: str = "ロールパネル", password: str = None):
+@app_commands.describe(roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2", title="タイトル", password="パスワード（省略可）")
+async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str, title: str = "ロールパネル", password: str = None):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.followup.send("ロール管理権限が必要です。", ephemeral=True)
         return
-    role_list = []
-    for part in roles.split(","):
-        m = re.search(r"<@&(\d+)>", part.strip())
-        if m:
-            r = interaction.guild.get_role(int(m.group(1)))
-            if r:
-                role_list.append(r)
-    if not role_list:
-        await interaction.followup.send("ロールが見つかりませんでした。", ephemeral=True)
+        
+    mapping = parse_roles_and_emojis(interaction.guild, roles_and_emojis)
+    if not mapping:
+        await interaction.followup.send("有効な「絵文字:ロール」のペアが見つかりません。例: `🍎:@Role1`", ephemeral=True)
         return
-    embed = discord.Embed(title=f"{title}", description="ボタンでロールを取得/解除できます。", color=0x5865F2)
+        
+    embed = discord.Embed(title=f"{title}", description="リアクションを押すことでロールを取得/解除できます。", color=0x5865F2)
     if password:
-        embed.set_footer(text="このパネルはパスワード保護されています")
-    await interaction.channel.send(embed=embed, view=RolePanelView(role_list, password))
+        embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
+        
+    msg = await interaction.channel.send(embed=embed)
+    
+    for emoji_str in mapping.keys():
+        try: await msg.add_reaction(emoji_str)
+        except Exception: pass
+            
+    db_write("reaction_roles", {"guild_id": interaction.guild_id, "roles": mapping, "password": password}, shared=str(msg.id))
     await interaction.followup.send("ロールパネルを作成しました。", ephemeral=True)
 
 # ──────────────────────────────────────────────
@@ -1748,6 +1804,63 @@ async def cmd_goodbye(interaction: discord.Interaction, action: str, channel: di
     elif action == "off":
         db_write("goodbye", {}, guild_id=interaction.guild_id)
         await interaction.followup.send("送別メッセージを無効化しました。", ephemeral=True)
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.user_id == bot.user.id:
+        return
+        
+    panel_data = db_read("reaction_roles", shared=str(payload.message_id))
+    if panel_data and isinstance(panel_data, dict):
+        guild = bot.get_guild(payload.guild_id)
+        if not guild: return
+        member = guild.get_member(payload.user_id)
+        if not member or member.bot: return
+        
+        emoji_str = str(payload.emoji)
+        roles = panel_data.get("roles", {})
+        if emoji_str in roles:
+            role_id = roles[emoji_str]
+            pw = panel_data.get("password")
+            
+            try:
+                ch = guild.get_channel(payload.channel_id)
+                msg = await ch.fetch_message(payload.message_id)
+                await msg.remove_reaction(payload.emoji, member)
+            except Exception:
+                pass
+                
+            role = guild.get_role(role_id)
+            if not role: return
+            
+            if role >= guild.me.top_role:
+                try:
+                    await ch.send(f"{member.mention} 権限エラー: Botのロール ({guild.me.top_role.name}) より上位のロールは操作できません。", delete_after=10)
+                except Exception:
+                    pass
+                return
+                
+            if pw:
+                try:
+                    view = DMPasswordView(guild.id, role_id, pw)
+                    await member.send(f"サーバー「{guild.name}」のロール **{role.name}** を取得/解除するにはパスワードが必要です。", view=view)
+                except discord.Forbidden:
+                    try:
+                        await ch.send(f"{member.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてもう一度お試しください。", delete_after=10)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    if role in member.roles:
+                        await member.remove_roles(role)
+                        try: await member.send(f"サーバー「{guild.name}」で **{role.name}** を外しました。")
+                        except Exception: pass
+                    else:
+                        await member.add_roles(role)
+                        try: await member.send(f"サーバー「{guild.name}」で **{role.name}** を付与しました。")
+                        except Exception: pass
+                except Exception as e:
+                    print(f"Rolepanel Error: {e}")
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -1864,6 +1977,120 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             _vc_join_times[guild_id][user_id] = now
 
 # ──────────────────────────────────────────────
+# 互換モード用（FakeInteraction / ModalProxy）
+# ──────────────────────────────────────────────
+class ModalProxyView(discord.ui.View):
+    def __init__(self, modal: discord.ui.Modal):
+        super().__init__(timeout=300)
+        self.modal = modal
+        
+    @discord.ui.button(label="入力画面を開く", style=discord.ButtonStyle.primary)
+    async def btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(self.modal)
+
+class FakeResponse:
+    def __init__(self, message):
+        self.message = message
+        self.is_done = False
+    async def send_message(self, *args, **kwargs):
+        kwargs.pop("ephemeral", None)
+        self.is_done = True
+        return await self.message.channel.send(*args, **kwargs)
+    async def defer(self, *args, **kwargs):
+        self.is_done = True
+        return
+    async def send_modal(self, modal):
+        self.is_done = True
+        try:
+            view = ModalProxyView(modal)
+            await self.message.author.send("互換モード（~コマンド）では直接入力画面を表示できません。\n以下のボタンから入力画面を開いてください。", view=view)
+            await self.message.channel.send(f"{self.message.author.mention} DMに入力画面へのリンクを送信しました。")
+        except discord.Forbidden:
+            await self.message.channel.send(f"{self.message.author.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてください。")
+
+class FakeFollowup:
+    def __init__(self, message):
+        self.message = message
+    async def send(self, *args, **kwargs):
+        kwargs.pop("ephemeral", None)
+        return await self.message.channel.send(*args, **kwargs)
+
+class FakeInteraction:
+    def __init__(self, message):
+        self.message = message
+        self.user = message.author
+        self.guild = message.guild
+        self.channel = message.channel
+        self.guild_id = message.guild.id if message.guild else None
+        self.channel_id = message.channel.id
+        self.response = FakeResponse(message)
+        self.followup = FakeFollowup(message)
+        self.client = bot
+        self.type = discord.InteractionType.application_command
+        
+    async def original_response(self):
+        return self.message
+
+async def _process_fake_interaction(message):
+    parts = message.content[1:].split()
+    if not parts: return False
+    cmd_name = parts[0]
+    args_list = parts[1:]
+    
+    commands = bot.tree.get_commands()
+    target_cmd = None
+    for c in commands:
+        if c.name == cmd_name:
+            target_cmd = c
+            break
+            
+    if not target_cmd:
+        return False
+        
+    kwargs = {}
+    try:
+        # app_commands.Command parameters parsing
+        params = getattr(target_cmd, "parameters", None)
+        if params is None and hasattr(target_cmd, "_params"):
+            params = list(target_cmd._params.values())
+        if params is None:
+            params = []
+            
+        for i, param in enumerate(params):
+            if i < len(args_list):
+                val = args_list[i]
+                typ = param.type
+                if typ == discord.AppCommandOptionType.integer:
+                    val = int(val)
+                elif typ == discord.AppCommandOptionType.boolean:
+                    val = val.lower() in ("true", "1", "yes", "on", "y")
+                elif typ == discord.AppCommandOptionType.user:
+                    val_id = re.sub(r"\D", "", val)
+                    if val_id.isdigit():
+                        val = message.guild.get_member(int(val_id)) or message.guild.get_member_named(val)
+                elif typ == discord.AppCommandOptionType.channel:
+                    val_id = re.sub(r"\D", "", val)
+                    if val_id.isdigit():
+                        val = message.guild.get_channel(int(val_id))
+                elif typ == discord.AppCommandOptionType.role:
+                    val_id = re.sub(r"\D", "", val)
+                    if val_id.isdigit():
+                        val = message.guild.get_role(int(val_id))
+                kwargs[param.name] = val
+            elif not param.required:
+                if param.default is not discord.utils.MISSING:
+                    kwargs[param.name] = param.default
+            else:
+                await message.channel.send(f"引数 `{param.name}` が不足しています。")
+                return True
+                
+        fake_i = FakeInteraction(message)
+        await target_cmd.callback(fake_i, **kwargs)
+    except Exception as e:
+        await message.channel.send(f"互換モード実行エラー: {e}")
+    return True
+
+# ──────────────────────────────────────────────
 # on_message (禁止ワード / 自動返信 / 川柳 / えっち / グローバルチャット)
 # ──────────────────────────────────────────────
 @bot.event
@@ -1871,6 +2098,10 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
         
+    if message.content.startswith("~"):
+        if await _process_fake_interaction(message):
+            return
+            
     # miq / miqc トリガー（返信メッセージへのメンション）
     msg_lower = message.content.lower()
     _miq_trigger = (
@@ -2203,6 +2434,70 @@ async def cmd_reaction(interaction: discord.Interaction, message_id: str):
         except Exception:
             pass
     await interaction.followup.send("obamaをつけました！", ephemeral=True)
+
+# ──────────────────────────────────────────────
+# /letterreact
+# ──────────────────────────────────────────────
+_LETTER_EMOJI_MAP: dict[str, str] = {
+    **{chr(ord("a") + i): chr(0x1F1E6 + i) for i in range(26)},   # a-z → 🇦-🇿
+    **{chr(ord("A") + i): chr(0x1F1E6 + i) for i in range(26)},   # A-Z → 🇦-🇿
+    "0": "0️⃣", "1": "1️⃣", "2": "2️⃣", "3": "3️⃣", "4": "4️⃣",
+    "5": "5️⃣", "6": "6️⃣", "7": "7️⃣", "8": "8️⃣", "9": "9️⃣",
+    "!": "❗", "?": "❓", "+": "➕", "-": "➖",
+}
+
+@bot.tree.command(name="letterreact", description="指定したメッセージに文字の絵文字をリアクションします")
+@app_commands.describe(message_id="対象のメッセージID", text="リアクションする文字（英数字）")
+async def cmd_letterreact(interaction: discord.Interaction, message_id: str, text: str):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.followup.send("メッセージ管理権限が必要です。", ephemeral=True)
+        return
+
+    try:
+        msg = await interaction.channel.fetch_message(int(message_id))
+    except Exception:
+        await interaction.followup.send("メッセージが見つかりませんでした。IDとチャンネルを確認してください。", ephemeral=True)
+        return
+
+    emojis_to_add = []
+    skipped = []
+    seen = set()
+    for ch in text:
+        if ch == " ":
+            continue
+        emoji = _LETTER_EMOJI_MAP.get(ch)
+        if emoji is None:
+            skipped.append(repr(ch))
+            continue
+        # 大文字・小文字は同じ絵文字になるので小文字に正規化して重複チェック
+        key = ch.lower()
+        if key in seen:
+            skipped.append(f"重複: {repr(ch)}")
+            continue
+        seen.add(key)
+        emojis_to_add.append(emoji)
+
+    if not emojis_to_add:
+        await interaction.followup.send("リアクションできる文字がありませんでした。英数字を指定してください。", ephemeral=True)
+        return
+
+    failed = []
+    for emoji in emojis_to_add:
+        try:
+            await msg.add_reaction(emoji)
+            await asyncio.sleep(0.4)
+        except Exception:
+            failed.append(emoji)
+
+    result_lines = [f"✅ `{text}` を絵文字でリアクションしました！"]
+    if skipped:
+        result_lines.append(f"⚠️ スキップした文字: {', '.join(skipped)}")
+    if failed:
+        result_lines.append(f"❌ 失敗: {', '.join(failed)}")
+    await interaction.followup.send("\n".join(result_lines), ephemeral=True)
+
+
 
 # ──────────────────────────────────────────────
 # 11. 川柳検出
@@ -4085,15 +4380,24 @@ async def cmd_quote(interaction: discord.Interaction, text: str, author: str = "
     file = await _make_quote_file(text, author_name, avatar_bytes, theme_name=theme, guild=interaction.guild, username=uname, color=color)
     await interaction.followup.send(file=file)
 
-@bot.tree.command(name="meigen", description="過去最大1000件のメッセージからAIが迷言を選び、名言カード画像を生成します")
-@app_commands.describe(channel="検索するチャンネル（省略=現在のチャンネル）")
+@bot.tree.command(name="meigen", description="過去のメッセージからAIが名言/迷言を発掘して名言カード画像を生成します")
+@app_commands.describe(
+    quote_type="発掘する種類（デフォルト: 迷言）",
+    channel="検索するチャンネル（省略=現在のチャンネル）"
+)
+@app_commands.choices(quote_type=[
+    app_commands.Choice(name="迷言（面白い発言）", value="funny"),
+    app_commands.Choice(name="名言（良い発言）", value="good")
+])
 async def cmd_meigen(interaction: discord.Interaction,
+                     quote_type: app_commands.Choice[str] = None,
                      channel: discord.TextChannel = None):
     await safe_defer(interaction)
     if not interaction.guild:
         await interaction.followup.send("サーバー内でのみ使用できます。", ephemeral=True); return
 
     target_ch = channel or interaction.channel
+    q_type = quote_type.value if quote_type else "funny"
 
     # 実在するメッセージを最大1000件収集
     raw_msgs = []
@@ -4111,6 +4415,8 @@ async def cmd_meigen(interaction: discord.Interaction,
                 "content": c,
                 "member":  interaction.guild.get_member(msg.author.id),
                 "id":      msg.id,
+                "url":     msg.jump_url,
+                "avatar_bytes": b""
             })
     except Exception as e:
         await interaction.followup.send(f"履歴取得エラー: {e}", ephemeral=True); return
@@ -4118,23 +4424,40 @@ async def cmd_meigen(interaction: discord.Interaction,
     if len(raw_msgs) < 3:
         await interaction.followup.send("会話履歴が少なすぎます。", ephemeral=True); return
 
-    numbered = list(reversed(raw_msgs))
-
+    # ランダムに最大100件をサンプリング（同じ発言ばかり選ばれるのを防ぐ）
+    import random
+    sample_size = min(len(raw_msgs), 100)
+    sampled = random.sample(raw_msgs, sample_size)
+    
     import json as _json
 
     async def _call_groq(log_lines: list[str]) -> dict | None:
         history_text = "\n".join(log_lines)
-        system_p = (
-            "あなたはDiscordの会話ログから「迷言」を発掘するAIです。\n"
-            "迷言とは：面白い・ズレてる・哲学っぽい・笑える・思わず二度見するような発言のことです。\n"
-            "必ずログの中から1件選んでください。選べない理由は存在しません。\n"
-            "出力はJSON形式のみ。前置き・説明・```は不要です。"
-        )
-        user_p = (
-            "以下の会話ログから最も迷言らしい発言を1つ選び、JSONで返してください。\n"
-            "形式: {\"index\": 番号, \"text\": \"発言内容（原文のまま）\", \"author\": \"発言者名\"}\n\n"
-            f"会話ログ:\n{history_text}"
-        )
+        if q_type == "funny":
+            system_p = (
+                "あなたはDiscordの会話ログから「迷言」を発掘するAIです。\n"
+                "迷言とは：面白い・ズレてる・哲学っぽい・笑える・思わず二度見するような発言のことです。\n"
+                "必ずログの中から1件選んでください。選べない理由は存在しません。\n"
+                "出力はJSON形式のみ。前置き・説明・```は不要です。"
+            )
+            user_p = (
+                "以下の会話ログから最も迷言らしい発言を1つ選び、JSONで返してください。\n"
+                "形式: {\"index\": 番号, \"text\": \"発言内容（原文のまま）\", \"author\": \"発言者名\"}\n\n"
+                f"会話ログ:\n{history_text}"
+            )
+        else:
+            system_p = (
+                "あなたはDiscordの会話ログから「名言」を発掘するAIです。\n"
+                "名言とは：心に響く・素晴らしい・教訓になる・感動的な発言のことです。\n"
+                "必ずログの中から1件選んでください。選べない理由は存在しません。\n"
+                "出力はJSON形式のみ。前置き・説明・```は不要です。"
+            )
+            user_p = (
+                "以下の会話ログから最も名言らしい発言を1つ選び、JSONで返してください。\n"
+                "形式: {\"index\": 番号, \"text\": \"発言内容（原文のまま）\", \"author\": \"発言者名\"}\n\n"
+                f"会話ログ:\n{history_text}"
+            )
+            
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -4151,53 +4474,66 @@ async def cmd_meigen(interaction: discord.Interaction,
                     },
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
+                    # リソース表示用にレートリミットを保存
+                    req_rem = resp.headers.get("x-ratelimit-remaining-requests", "N/A")
+                    req_lim = resp.headers.get("x-ratelimit-limit-requests", "N/A")
+                    tok_rem = resp.headers.get("x-ratelimit-remaining-tokens", "N/A")
+                    tok_lim = resp.headers.get("x-ratelimit-limit-tokens", "N/A")
+                    bot._groq_ratelimit = {
+                        "req_rem": req_rem, "req_lim": req_lim,
+                        "tok_rem": tok_rem, "tok_lim": tok_lim
+                    }
+                    
                     if resp.status == 200:
                         data = await resp.json()
                         raw = data["choices"][0]["message"]["content"].strip()
-                        raw_clean = raw.lstrip("```json").lstrip("```").rstrip("```").strip()
-                        return _json.loads(raw_clean)
+                        # コードフェンス除去（```json ... ``` や ``` ... ``` 形式に対応）
+                        import re as _re
+                        raw_clean = _re.sub(r"^```(?:json)?\s*", "", raw, flags=_re.MULTILINE)
+                        raw_clean = _re.sub(r"```\s*$", "", raw_clean, flags=_re.MULTILINE).strip()
+                        try:
+                            return _json.loads(raw_clean)
+                        except Exception:
+                            # JSONが複数ある場合は最初の{}ブロックだけ抽出して試みる
+                            m = _re.search(r'\{[^{}]+\}', raw_clean, _re.DOTALL)
+                            if m:
+                                try:
+                                    return _json.loads(m.group(0))
+                                except Exception:
+                                    pass
+                    elif resp.status == 429:
+                        pass  # レートリミット: フォールバックへ
         except Exception:
             pass
         return None
 
-    # 1000件を超える場合は分割して試みる（最大2チャンク）
-    chunk_size = 500
-    selected_text, selected_author, selected_member, selected_msg_id = "", "", None, None
-
-    for chunk_start in range(0, min(len(numbered), 1000), chunk_size):
-        chunk = numbered[chunk_start:chunk_start + chunk_size]
-        log_lines = [f"[{i}] {m['display']}: {m['content'][:100]}" for i, m in enumerate(chunk)]
-        parsed = await _call_groq(log_lines)
-        if not parsed:
-            continue
+    # サンプリングしたものをGroqに渡す
+    log_lines = [f"[{i}] {m['display']}: {m['content'][:100]}" for i, m in enumerate(sampled)]
+    parsed = await _call_groq(log_lines)
+    
+    selected_entry = None
+    if parsed:
         idx = parsed.get("index")
         if idx is not None:
             try:
                 idx = int(idx)
+                if 0 <= idx < len(sampled):
+                    selected_entry = sampled[idx]
             except Exception:
-                idx = None
-        if idx is not None and 0 <= idx < len(chunk):
-            entry = chunk[idx]
-            selected_text   = entry["content"]
-            selected_author = entry["display"]
-            selected_member = entry["member"]
-            selected_msg_id = entry["id"]
-            break
-        # indexが外れた場合はtextで照合
-        txt = parsed.get("text", "").strip()
-        if txt:
-            for entry in chunk:
-                if entry["content"][:50] == txt[:50]:
-                    selected_text   = entry["content"]
-                    selected_author = entry["display"]
-                    selected_member = entry["member"]
-                    selected_msg_id = entry["id"]
-                    break
-            if selected_text:
-                break
-
+                pass
+                
+    if not selected_entry:
+        # Groqが失敗した場合はランダムに1つ選ぶフォールバック
+        selected_entry = random.choice(sampled)
+        
+    selected_text   = selected_entry["content"]
+    selected_author = selected_entry["display"]
+    selected_member = selected_entry["member"]
+    selected_msg_id = selected_entry["id"]
+    selected_url    = selected_entry["url"]
+    
     if not selected_text:
-        await interaction.followup.send("迷言が見つかりませんでした。", ephemeral=True); return
+        await interaction.followup.send("迷言/名言が見つかりませんでした。", ephemeral=True); return
 
     avatar_bytes = b""
     if selected_member and selected_member.display_avatar:
@@ -4213,8 +4549,7 @@ async def cmd_meigen(interaction: discord.Interaction,
                                   guild=interaction.guild, username=uname)
 
     # メッセージ直リンク
-    link = f"https://discord.com/channels/{interaction.guild.id}/{target_ch.id}/{selected_msg_id}" if selected_msg_id else ""
-    content = link if link else None
+    content = selected_url if selected_url else None
     await interaction.followup.send(content=content, file=file)
 
 def _wrap_text(text: str, font, max_width: int) -> list[str]:
