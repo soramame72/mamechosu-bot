@@ -633,15 +633,15 @@ HELP_TEXT = {
         "- `interval_min/max` : 発言間隔の最小・最大（分単位、管理者のみ変更可）\n"
         "**仕様:**\n"
         "- Webhookでキャラ固有アイコン・名前で発言\n"
-        "- Groq API (LLaMA-3.3-70B) でAI応答を生成\n"
+        "- Groq API (openai/gpt-oss-120b) でAI応答を生成\n"
         "- Bot再起動後も自動復旧（永続化）\n"
         "- 一般ユーザーの発言にキャラが反応することがあります"
     ),
-    "chat_set_key": (
-        "**AIチャット用カスタムAPIキーを設定します（管理者専用）。**\n"
-        "使い方: `/chat_set_key api_key:[Groq APIキー]`\n"
+    "apikey": (
+        "**サーバー独自のGroq APIキーを設定します（管理者専用）。**\n"
+        "使い方: `/apikey api_key:[Groq APIキー]`\n"
         "**仕様:**\n"
-        "- 設定するとそのサーバーのAIチャットはそのキーを使用\n"
+        "- 設定すると、このサーバーのAI機能（川柳検出・えっち検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてがそのキーを使用します。AIチャット専用ではありません。\n"
         "- 空で実行するとカスタムキーを削除してデフォルトに戻す\n"
         "- Groq APIキーは https://console.groq.com/ で無料発行可能\n"
         "必要権限: サーバー管理権限"
@@ -650,7 +650,8 @@ HELP_TEXT = {
         "**入力したメッセージをBotがそのまま発言します。**\n"
         "使い方: `/echo message:[メッセージ]`\n"
         "Botに喋らせたい文章を入力すると、Botが代わりに発言します。\n"
-        "[注意] 誰が使ったかはメッセージの最後に表示されます。"
+        "[注意] 誰が使ったかはメッセージの最後に表示されます。\n"
+        "必要権限: 管理者権限"
     ),
     "ranking": (
         "**サーバー内の活動ランキング（TOP 10）を表示します。**\n"
@@ -698,7 +699,8 @@ HELP_TEXT = {
     "impersonate": (
         "**指定したユーザーになりすまして発言します。**\n"
         "使い方: `/impersonate user:[ユーザー] message:[発言内容] attachment:[画像]`\n"
-        "※一定確率で正体がバレる煽りメッセージが表示されます。"
+        "※一定確率で正体がバレる煽りメッセージが表示されます。\n"
+        "必要権限: メッセージ管理権限"
     ),
     "impersonatechance": (
         "**なりすましがバレる確率を設定します。**\n"
@@ -733,7 +735,7 @@ HELP_TEXT = {
         "- `channel` : 検索対象チャンネル（省略すると現在のチャンネル）\n"
         "**仕様:**\n"
         "- 過去1000件のメッセージからランダムに100件サンプリング\n"
-        "- Groq AI（LLaMA-3.3-70B）が該当発言を選出\n"
+        "- Groq AI（openai/gpt-oss-120b）が該当発言を選出\n"
         "- 選出結果は画像カードとメッセージリンク付きで送信\n"
         "- Groq APIが利用不可な場合はランダムフォールバック"
     ),
@@ -781,7 +783,11 @@ async def cmd_help(interaction: discord.Interaction, command: str = None):
 
 @bot.tree.command(name="echo", description="入力したメッセージをBotがそのまま発言します")
 @app_commands.describe(message="発言させたいメッセージ")
+@app_commands.default_permissions(administrator=True)
 async def cmd_echo(interaction: discord.Interaction, message: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("管理者権限が必要です。", ephemeral=True)
+        return
     # 普通にレスポンスを返すことで「誰がコマンドを実行したか」がDiscord標準のUIで表示される
     await interaction.response.send_message(message)
 
@@ -1088,6 +1094,16 @@ class VerifySetModal(discord.ui.Modal, title="認証パネル作成"):
         except Exception as e:
             await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
 
+def _normalize_reaction_emoji(emoji_str: str):
+    """カスタム絵文字の <:name:id> / <a:name:id> 形式を add_reaction が受け付ける形に正規化する。
+    Unicode絵文字の場合はそのまま返す。"""
+    try:
+        if emoji_str.startswith("<") and emoji_str.endswith(">"):
+            return discord.PartialEmoji.from_str(emoji_str)
+    except Exception:
+        pass
+    return emoji_str
+
 def parse_roles_and_emojis(guild, text: str):
     mapping = {}
     for part in text.split(","):
@@ -1098,9 +1114,16 @@ def parse_roles_and_emojis(guild, text: str):
         role_str = role_str.strip()
         
         m = re.search(r"<@&(\d+)>", role_str)
-        if m: role_id = int(m.group(1))
-        elif role_str.isdigit(): role_id = int(role_str)
-        else: continue
+        if m:
+            role_id = int(m.group(1))
+        elif role_str.isdigit():
+            role_id = int(role_str)
+        else:
+            # ロール名で解決（先頭の@は除去、大文字小文字は区別しない）
+            name = role_str[1:] if role_str.startswith("@") else role_str
+            role_obj = discord.utils.find(lambda r: r.name.lower() == name.lower(), guild.roles)
+            if not role_obj: continue
+            role_id = role_obj.id
             
         role = guild.get_role(role_id)
         if role:
@@ -1135,7 +1158,7 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
             
             msg = await ch.send(embed=embed)
             for emoji_str in mapping.keys():
-                try: await msg.add_reaction(emoji_str)
+                try: await msg.add_reaction(_normalize_reaction_emoji(emoji_str))
                 except Exception: pass
                 
             db_write("reaction_roles", {"guild_id": guild.id, "roles": mapping, "password": pw}, shared=str(msg.id))
@@ -1410,7 +1433,7 @@ class _BtnStopAIChat(discord.ui.Button):
         else:
             await i.response.send_message("AIチャットは稼働中ではありません", ephemeral=True)
 
-class AICustomKeyModal(discord.ui.Modal, title="カスタムAPIキー設定"):
+class AICustomKeyModal(discord.ui.Modal, title="サーバー独自APIキー設定（全AI機能共通）"):
     api_key = discord.ui.TextInput(label="Groq APIキー", placeholder="gsk_...", required=True)
     def __init__(self, gid):
         super().__init__()
@@ -1420,7 +1443,7 @@ class AICustomKeyModal(discord.ui.Modal, title="カスタムAPIキー設定"):
         if not isinstance(settings, dict): settings = {}
         settings["custom_api_key"] = self.api_key.value
         db_write("aichat_settings", settings, guild_id=self.gid)
-        await interaction.response.send_message("カスタムAPIキーを保存しました。", ephemeral=True)
+        await interaction.response.send_message("サーバー独自のAPIキーを保存しました。このサーバーのAI機能すべてに適用されます。", ephemeral=True)
 
 class AIFrequencyModal(discord.ui.Modal, title="AIチャット会話頻度設定"):
     freq_min = discord.ui.TextInput(label="最小間隔 (分)", placeholder="10", required=True)
@@ -1449,7 +1472,7 @@ class AIFrequencyModal(discord.ui.Modal, title="AIチャット会話頻度設定
 
 class _BtnSetAICustomKey(discord.ui.Button):
     def __init__(self, gid):
-        super().__init__(label="APIキー設定", style=discord.ButtonStyle.secondary, row=1)
+        super().__init__(label="APIキー設定(全AI機能共通)", style=discord.ButtonStyle.secondary, row=1)
         self.gid = gid
     async def callback(self, i):
         await i.response.send_modal(AICustomKeyModal(self.gid))
@@ -1768,7 +1791,7 @@ async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str,
     msg = await interaction.channel.send(embed=embed)
     
     for emoji_str in mapping.keys():
-        try: await msg.add_reaction(emoji_str)
+        try: await msg.add_reaction(_normalize_reaction_emoji(emoji_str))
         except Exception: pass
             
     db_write("reaction_roles", {"guild_id": interaction.guild_id, "roles": mapping, "password": password}, shared=str(msg.id))
@@ -5000,6 +5023,10 @@ async def cmd_romaji(interaction: discord.Interaction,
 async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, message: str, attachment: discord.Attachment = None):
     await safe_defer(interaction, ephemeral=True)
 
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.followup.send("メッセージ管理権限が必要です。", ephemeral=True)
+        return
+
     gd = db_read("impersonate", guild_id=interaction.guild_id)
     if not (gd.get("server", True) or interaction.channel.id in gd.get("channels", [])):
         await interaction.followup.send("このチャンネルではなりすまし機能がOFFになっています。", ephemeral=True)
@@ -5317,10 +5344,10 @@ async def _chat_loop(channel_id: int):
         wait_seconds = random.uniform(interval_min * 60.0, interval_max * 60.0)
         await asyncio.sleep(wait_seconds)
 
-@bot.tree.command(name="chat_set_key", description="AIチャット用のGroq APIキーを設定します（管理者専用・設定しないとAIチャットは動作しません）")
+@bot.tree.command(name="apikey", description="サーバー独自のGroq APIキーを設定します（管理者専用・川柳/えっち検出/AIチャット等すべてのAI機能に適用されます）")
 @app_commands.describe(api_key="設定するGroq APIキー（空の場合は削除）")
 @app_commands.default_permissions(manage_guild=True)
-async def cmd_chat_set_key(interaction: discord.Interaction, api_key: str = None):
+async def cmd_apikey(interaction: discord.Interaction, api_key: str = None):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.followup.send("サーバー管理権限が必要です。", ephemeral=True)
@@ -5333,7 +5360,7 @@ async def cmd_chat_set_key(interaction: discord.Interaction, api_key: str = None
     if api_key:
         settings["custom_api_key"] = api_key
         db_write("aichat_settings", settings, guild_id=gid)
-        await interaction.followup.send("カスタムAPIキーを保存しました。", ephemeral=True)
+        await interaction.followup.send("サーバー独自のAPIキーを保存しました。このサーバーのAI機能（川柳検出・えっち検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてに適用されます。", ephemeral=True)
     else:
         if "custom_api_key" in settings:
             del settings["custom_api_key"]
