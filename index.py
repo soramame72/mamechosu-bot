@@ -97,7 +97,7 @@ def db_write(feature: str, data, guild_id: int | None = None, *, shared: str | N
                 json.dump(data, f, ensure_ascii=False, indent=2)
             os.replace(tmp, path)
         except Exception as e:
-            print(f"[db] 書き込みエラー {feature}/{name}: {e}")
+            pass
 
 
 def db_log(action: str, detail: str = "", level: str = "INFO"):
@@ -285,6 +285,15 @@ async def cmd_akeomeset(interaction: discord.Interaction, channel: discord.TextC
 
 @bot.event
 async def on_ready():
+    if getattr(bot, "_did_initial_setup", False):
+        # 再接続時は状態再設定のみ行い、起動時ログや再同期は行わない
+        try:
+            await bot.change_presence(activity=discord.CustomActivity(name="ver1.4"))
+        except Exception:
+            pass
+        return
+    bot._did_initial_setup = True
+
     if not akeome_loop.is_running():
         akeome_loop.start()
     print(f"ログイン: {bot.user} (ID: {bot.user.id})")
@@ -351,6 +360,13 @@ async def on_ready():
                         _vc_join_times[guild.id][member.id] = now_ts
 
 @bot.event
+async def on_error(event_method, *args, **kwargs):
+    """未処理の例外はコンソールへ出力せず、ログファイルにのみ記録する。"""
+    import traceback
+    err_str = traceback.format_exc()
+    db_log("unhandled_error", f"event={event_method} | {err_str[:1500]}", level="ERROR")
+
+@bot.event
 async def on_guild_remove(guild: discord.Guild):
     removed = db_read("removed_guilds", shared="index")
     if not isinstance(removed, dict):
@@ -370,7 +386,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         else:
             await interaction.response.send_message(f"@silent [エラー] コマンド実行中にエラーが発生しました:\n```\n{err_str[:1900]}\n```", ephemeral=True)
     except Exception as e:
-        print(f"Failed to send error to Discord: {e}\nOriginal Error: {error}")
+        pass
 
 
 # ──────────────────────────────────────────────
@@ -1109,8 +1125,12 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
                 await interaction.response.send_message("有効な「絵文字:ロール」のペアが見つかりません。", ephemeral=True); return
                 
             pw = self.password.value.strip() or None
-            embed = discord.Embed(title=self.panel_title.value,
-                                  description="リアクションを押すことでロールを取得/解除できます。", color=0x5865F2)
+            desc = "リアクションを押すことでロールを取得/解除できます。\n\n"
+            for emoji_str, role_id in mapping.items():
+                r = guild.get_role(role_id)
+                if r: desc += f"{emoji_str} : {r.mention}\n"
+            
+            embed = discord.Embed(title=self.panel_title.value, description=desc, color=0x5865F2)
             if pw: embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
             
             msg = await ch.send(embed=embed)
@@ -1853,14 +1873,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 try:
                     if role in member.roles:
                         await member.remove_roles(role)
-                        try: await member.send(f"サーバー「{guild.name}」で **{role.name}** を外しました。")
+                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を外しました。", delete_after=5)
                         except Exception: pass
                     else:
                         await member.add_roles(role)
-                        try: await member.send(f"サーバー「{guild.name}」で **{role.name}** を付与しました。")
+                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5)
                         except Exception: pass
                 except Exception as e:
-                    print(f"Rolepanel Error: {e}")
+                    pass
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -2003,10 +2023,11 @@ class FakeResponse:
         self.is_done = True
         try:
             view = ModalProxyView(modal)
-            await self.message.author.send("互換モード（~コマンド）では直接入力画面を表示できません。\n以下のボタンから入力画面を開いてください。", view=view)
-            await self.message.channel.send(f"{self.message.author.mention} DMに入力画面へのリンクを送信しました。")
-        except discord.Forbidden:
-            await self.message.channel.send(f"{self.message.author.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてください。")
+            await self.message.channel.send(
+                f"{self.message.author.mention} 互換モード（~コマンド）では直接入力画面を表示できません。\n以下のボタンから入力画面を開いてください。",
+                view=view, delete_after=120)
+        except Exception:
+            pass
 
 class FakeFollowup:
     def __init__(self, message):
@@ -2126,7 +2147,7 @@ async def on_message(message: discord.Message):
                     target_msg.content, target_msg.author.display_name, avatar_bytes,
                     guild=message.guild, username=target_msg.author.name, color=use_color
                 )
-                await message.reply(file=img_file)
+                await message.channel.send(file=img_file, reference=target_msg, mention_author=False)
                 return
         except Exception:
             pass
@@ -2161,7 +2182,7 @@ async def on_message(message: discord.Message):
                         src_msg.content, src_msg.author.display_name, avatar_bytes,
                         guild=message.guild, username=src_msg.author.name, color=use_color
                     )
-                    await message.reply(file=img_file)
+                    await message.channel.send(file=img_file, reference=src_msg, mention_author=False)
                     return
         except Exception:
             pass
@@ -2195,8 +2216,9 @@ async def on_message(message: discord.Message):
         text = message.content.strip()
         if not text.startswith("!") and re.match(r"^[a-zA-Z0-9\s.,!?'-]+$", text) and re.search(r"[a-zA-Z]", text):
             # GROQで翻訳
-            if GROQ_API_KEY:
-                translated = await _groq_translate_romaji(text)
+            api_key = get_groq_api_key(message.guild.id if message.guild else None)
+            if api_key:
+                translated = await _groq_translate_romaji(text, api_key)
                 if translated:
                     await message.reply(f"[翻訳]: {translated}")
 
@@ -2698,8 +2720,16 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
 KINSOKU_CHARS = set("、。，．」』ぁぃぅぇぉっゃゅょァィゥェォッャュョ")
 COLS_PER_PAGE = 20
 
-async def _groq_generate_sakubun(theme: str, length: int) -> str:
-    if not GROQ_API_KEY: return ""
+def get_groq_api_key(guild_id: int = None) -> str:
+    if guild_id:
+        st = db_read("aichat_settings", guild_id=guild_id)
+        if st.get("custom_api_key"):
+            return st["custom_api_key"]
+    return AICHAT_API_KEY or GROQ_API_KEY
+
+async def _groq_generate_sakubun(theme: str, length: int, guild_id: int = None) -> str:
+    api_key = get_groq_api_key(guild_id)
+    if not api_key: return ""
     prompt = (
         f"あなたは小学生です。\n"
         f"テーマ「{theme}」について、{length}文字程度の作文を書いてください。\n\n"
@@ -2713,9 +2743,9 @@ async def _groq_generate_sakubun(theme: str, length: int) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1500,
                     "temperature": 0.6,
@@ -2925,12 +2955,13 @@ def build_haiku_image(parts: list[str]) -> Image.Image:
 
     return img
 
-async def _groq_extract_haiku(text: str) -> list[str] | None:
+async def _groq_extract_haiku(text: str, guild_id: int = None) -> list[str] | None:
     """
     GROQを使って文章中の川柳を検出する。
     5-7-5に限定せず、字余り・字足らずも許容する。
     """
-    if not GROQ_API_KEY:
+    api_key = get_groq_api_key(guild_id)
+    if not api_key:
         return None
     try:
         prompt = (
@@ -2951,10 +2982,10 @@ async def _groq_extract_haiku(text: str) -> list[str] | None:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                headers={"Authorization": f"Bearer {api_key}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 60,
                     "temperature": 0.1,
@@ -3005,7 +3036,8 @@ async def check_haiku(message: discord.Message):
     try:
         parts = None
         # GROQを優先（字余り・字足らず・文章中の検出が得意）
-        if GROQ_API_KEY and 5 <= len(text) <= 120:
+        api_key = get_groq_api_key(message.guild.id if message.guild else None)
+        if api_key and 5 <= len(text) <= 120:
             parts = await _groq_extract_haiku(text)
         else:
             # GROQがない場合のみローカル検出
@@ -3274,7 +3306,7 @@ async def do_restore(interaction: discord.Interaction, backup: dict):
             )
             await asyncio.sleep(0.35)
         except Exception as e:
-            print(f"[restore] ロール作成エラー {rd['name']}: {e}")
+            pass
 
     await progress("カテゴリを復元中...")
     cat_map = {}
@@ -3534,8 +3566,9 @@ LEWD_REPLIES = [
     "んぁっ…すきすきすき…こんなきもちよくするひと…すきになっちゃうよ…♡♡♡",
 ]
 
-async def _groq_check_lewd(text: str) -> bool:
-    if not GROQ_API_KEY:
+async def _groq_check_lewd(text: str, guild_id: int = None) -> bool:
+    api_key = get_groq_api_key(guild_id)
+    if not api_key:
         return any(kw.lower() in text.lower() for kw in LEWD_KEYWORDS)
     try:
         prompt = (
@@ -3553,10 +3586,10 @@ async def _groq_check_lewd(text: str) -> bool:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                headers={"Authorization": f"Bearer {api_key}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,
                     "temperature": 0.1,
@@ -3987,7 +4020,7 @@ async def _supiki_webhook(channel: discord.TextChannel):
             wh = await channel.create_webhook(name="ｽﾋﾟｷ", avatar=avatar)
         return wh
     except Exception as e:
-        print(f"[supiki] {e}")
+        pass
         return None
 
 # ──────────────────────────────────────────────
@@ -4431,6 +4464,10 @@ async def cmd_meigen(interaction: discord.Interaction,
     
     import json as _json
 
+    api_key = get_groq_api_key(interaction.guild_id)
+    if not api_key:
+        await interaction.followup.send("Groq APIキーが設定されていません。", ephemeral=True); return
+
     async def _call_groq(log_lines: list[str]) -> dict | None:
         history_text = "\n".join(log_lines)
         if q_type == "funny":
@@ -4462,9 +4499,9 @@ async def cmd_meigen(interaction: discord.Interaction,
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "llama-3.3-70b-versatile",
+                        "model": "openai/gpt-oss-120b",
                         "messages": [
                             {"role": "system", "content": system_p},
                             {"role": "user",   "content": user_p},
@@ -4640,14 +4677,26 @@ async def relay_global_message(message: discord.Message):
     user_id = message.author.id
     now = time.time()
 
-    # 1. スパム対策（一時ブロックチェック）
+    # 1. メンション禁止（ユーザー・everyone/here・ロール）
+    if message.mentions or message.role_mentions or message.mention_everyone:
+        try:
+            await message.delete()
+        except: pass
+        try:
+            await message.channel.send(
+                f"{message.author.mention} グローバルチャットではメンション（ユーザー・everyone/here・ロール）を送信できません。",
+                delete_after=8)
+        except: pass
+        return
+
+    # 2. スパム対策（一時ブロックチェック）
     if _global_user_blocks.get(user_id, 0) > now:
         try:
             await message.delete()
         except: pass
         return
 
-    # 2. 利用規約同意チェック
+    # 3. 利用規約同意チェック
     agreed_users = db_read("globalchat", shared="agreed_users")
     if not isinstance(agreed_users, list):
         agreed_users = []
@@ -4668,13 +4717,12 @@ async def relay_global_message(message: discord.Message):
         )
         view = GlobalChatTosView()
         try:
-            await message.author.send(tos_text, view=view)
-            await message.channel.send(f"{message.author.mention} グローバルチャットの利用規約をDMに送信しました。確認して同意ボタンを押してください。", delete_after=10)
-        except discord.Forbidden:
-            await message.channel.send(f"[エラー] {message.author.mention} DMが閉じられているため、利用規約を送信できませんでした。設定からDMを許可してください。", delete_after=10)
+            await message.channel.send(f"{message.author.mention}\n{tos_text}", view=view, delete_after=120)
+        except Exception:
+            pass
         return
 
-    # 3. 連投・スパム対策（レート制限と内容重複チェック）
+    # 4. 連投・スパム対策（レート制限と内容重複チェック）
     # クールダウン（3秒に1回）
     last_send = _global_user_timestamps.get(user_id, 0.0)
     if now - last_send < 3.0:
@@ -4689,11 +4737,15 @@ async def relay_global_message(message: discord.Message):
             _global_user_blocks[user_id] = now + 300  # 5分ブロック
             message.author._global_spam_violations = 0
             try:
-                await message.author.send("[警告] 連投スパムが検出されたため、5分間グローバルチャットの利用を一時停止（ブロック）しました。")
+                await message.channel.send(
+                    f"{message.author.mention} [警告] 連投スパムが検出されたため、5分間グローバルチャットの利用を一時停止（ブロック）しました。",
+                    delete_after=8)
             except: pass
         else:
             try:
-                await message.author.send("[警告] グローバルチャットへの送信速度が早すぎます。少し時間をおいてから送信してください。")
+                await message.channel.send(
+                    f"{message.author.mention} [警告] グローバルチャットへの送信速度が早すぎます。少し時間をおいてから送信してください。",
+                    delete_after=8)
             except: pass
         return
     
@@ -4705,7 +4757,9 @@ async def relay_global_message(message: discord.Message):
             await message.delete()
         except: pass
         try:
-            await message.author.send("[警告] 10秒以内に同じ内容のメッセージを連投することはできません。")
+            await message.channel.send(
+                f"{message.author.mention} [警告] 10秒以内に同じ内容のメッセージを連投することはできません。",
+                delete_after=8)
         except: pass
         return
 
@@ -4731,7 +4785,8 @@ async def relay_global_message(message: discord.Message):
             if c["channel_id"] == message.channel.id: continue
             try:
                 async with session.post(c["webhook_url"],
-                    json={"username": uname, "avatar_url": avatar, "content": content[:2000]},
+                    json={"username": uname, "avatar_url": avatar, "content": content[:2000],
+                          "allowed_mentions": {"parse": []}},
                     timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status == 404:
                         remaining = [x for x in get_global_channels() if x.get("webhook_url") != c["webhook_url"]]
@@ -4778,8 +4833,9 @@ async def cmd_globalchat(interaction: discord.Interaction, action: str):
 # ──────────────────────────────────────────────
 ATSUMORI_KEYWORDS = ["熱盛", "あつもり", "アツモリ", "ATSUMORI", "atsumori"]
 
-async def _groq_check_atsumori(text: str) -> bool:
-    if not GROQ_API_KEY:
+async def _groq_check_atsumori(text: str, guild_id: int = None) -> bool:
+    api_key = get_groq_api_key(guild_id)
+    if not api_key:
         return any(w in text for w in ATSUMORI_KEYWORDS)
     try:
         prompt = (
@@ -4796,10 +4852,10 @@ async def _groq_check_atsumori(text: str) -> bool:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                headers={"Authorization": f"Bearer {api_key}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,
                     "temperature": 0.3,
@@ -4869,7 +4925,7 @@ async def cmd_atsumori(interaction: discord.Interaction,
 # ──────────────────────────────────────────────
 # ローマ字翻訳 (romaji)
 # ──────────────────────────────────────────────
-async def _groq_translate_romaji(text: str) -> str:
+async def _groq_translate_romaji(text: str, api_key: str) -> str:
     try:
         system_prompt = (
             "あなたはローマ字（ヘボン式・訓令式・口語混じり）を自然な日本語に変換するエキスパートです。"
@@ -4886,10 +4942,10 @@ async def _groq_translate_romaji(text: str) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                headers={"Authorization": f"Bearer {api_key}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": user_prompt},
@@ -5123,17 +5179,7 @@ if not hasattr(bot, "_groq_ratelimit"):
 
 async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: str, channel_id: int = None, guild_id: int = None) -> str:
     # カスタムAPIキーの決定
-    api_key = GROQ_API_KEY
-    if guild_id:
-        settings = db_read("aichat_settings", str(guild_id))
-        if isinstance(settings, dict):
-            custom_key = settings.get("custom_api_key")
-            if custom_key:
-                api_key = custom_key
-            elif AICHAT_API_KEY:
-                api_key = AICHAT_API_KEY
-    elif AICHAT_API_KEY:
-        api_key = AICHAT_API_KEY
+    api_key = get_groq_api_key(guild_id)
         
     if not api_key:
         return ""
@@ -5175,7 +5221,7 @@ async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: s
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": messages,
                     "temperature": 0.9,
                     "max_tokens": 150,
@@ -5224,7 +5270,7 @@ async def _chat_loop(channel_id: int):
         if not webhook:
             webhook = await channel.create_webhook(name="MamechosuChat")
     except Exception as e:
-        print(f"Webhook error in chat: {e}")
+        pass
         return
 
     history = session["history"]
@@ -5260,7 +5306,7 @@ async def _chat_loop(channel_id: int):
                     await webhook.edit(name=speaker.display_name, avatar=None)
                 await webhook.send(content=reply)
             except Exception as e:
-                print(f"Webhook send error: {e}")
+                pass
 
         # 会話頻度ロジック（10〜20分間隔などの長期待機）
         guild_id = channel.guild.id
