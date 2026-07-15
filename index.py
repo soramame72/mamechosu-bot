@@ -2495,9 +2495,6 @@ _LETTER_EMOJI_MAP: dict[str, str] = {
 @app_commands.describe(message_id="対象のメッセージID", text="リアクションする文字（英数字）")
 async def cmd_letterreact(interaction: discord.Interaction, message_id: str, text: str):
     await safe_defer(interaction, ephemeral=True)
-    if not interaction.user.guild_permissions.manage_messages:
-        await interaction.followup.send("メッセージ管理権限が必要です。", ephemeral=True)
-        return
 
     try:
         msg = await interaction.channel.fetch_message(int(message_id))
