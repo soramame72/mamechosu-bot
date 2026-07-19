@@ -5278,10 +5278,10 @@ async def _secret_fetch_avatar_bytes(member: discord.Member) -> bytes:
     return b""
 
 SECRET_SENRYU_FALLBACK_PARTS = [
-    ["あきのそら", "みあげてひとり", "ためいきす"],
-    ["ゆうやけに", "とけてゆくひび", "おしみけり"],
-    ["かぜかおる", "ごがつのそらに", "ゆめのせて"],
-    ["まんいんの", "でんしゃのなかで", "ゆめをみる"],
+    ["秋の空", "見上げてひとり", "ため息す"],
+    ["夕焼けに", "溶けてゆく日々", "惜しみけり"],
+    ["風薫る", "五月の空に", "夢のせて"],
+    ["満員の", "電車の中で", "夢を見る"],
 ]
 
 async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
@@ -5292,6 +5292,10 @@ async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
         "あなたは川柳作家です。\n"
         "日常のおもしろい一場面を、五・七・五（17モーラ）で表現した川柳を1句だけ作ってください。\n"
         "上の句(5モーラ)・中の句(7モーラ)・下の句(5モーラ)に厳密に区切れるものだけを作ること。\n"
+        "【表記の絶対ルール】\n"
+        "- ひらがなだけの句は絶対に禁止。一般的な日本語の文章として、漢字を使うべき単語は必ず漢字で書くこと（例: 空、電車、夢、今日、会社 など）。\n"
+        "- 助詞（は・が・を・に・で・と など）や送り仮名だけをひらがなにし、それ以外の名詞・動詞・形容詞は通常の漢字表記を用いること。\n"
+        "- 全体がひらがなのみの句になっていないか、出力前に必ず確認すること。\n\n"
         "以下の形式だけで答えてください（説明不要）:\n"
         "句1|句2|句3"
     )
@@ -5312,7 +5316,10 @@ async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
                     data = await resp.json()
                     raw = data["choices"][0]["message"]["content"].strip()
                     parts = [p.strip() for p in raw.split("|")]
-                    if len(parts) == 3 and all(parts):
+                    is_all_kana = all(
+                        not _re_md.search(r"[\u4e00-\u9fff]", p) for p in parts
+                    )
+                    if len(parts) == 3 and all(parts) and not is_all_kana:
                         return parts
     except Exception:
         pass
