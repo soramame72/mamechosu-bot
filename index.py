@@ -315,6 +315,9 @@ async def on_ready():
     try:
         task_save_vc_rankings.start()
     except: pass
+    try:
+        secret_nick_revert_loop.start()
+    except: pass
 
     try:
         bot.add_view(GlobalChatTosView())
@@ -759,6 +762,14 @@ HELP_TEXT = {
         "**仕様:**\n"
         "- 同じ文字が重複する場合は最初の1件のみリアクション（Discordの仕様）\n"
         "必要権限: メッセージ管理権限"
+    ),
+    "secret": (
+        "**【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。**\n"
+        "使い方: `/secret`\n"
+        "**仕様:**\n"
+        "実行するたびに、以下からランダムで1つだけいたずらが発生します。\n"
+        "結果は全員に見える形でチャンネルに公開されます。\n"
+        "必要権限: 管理者権限"
     ),
 }
 
@@ -5131,6 +5142,229 @@ async def cmd_impersonateset(interaction: discord.Interaction,
         msg = f"{target.mention} のなりすまし機能を {'ON' if on else 'OFF'} にしました。"
     db_write("impersonate", gd, guild_id=interaction.guild_id)
     await interaction.followup.send(msg, ephemeral=True)
+
+# ──────────────────────────────────────────────
+# 21.5 /secret 【使用注意！！】何が起こるかわかりません
+# 身内鯖以外での使用は推奨しません。
+# ──────────────────────────────────────────────
+SECRET_WARNING = "【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。"
+
+SECRET_RICK_URL = "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick.gif"
+
+SECRET_OBAMA_FALLBACK = ["おばまです", "オバマなのだ…", "…オバマ"]
+
+SECRET_NICKNAMES = [
+    "ちんちくりん", "変態さん", "おばかさん", "むしさん", "ぷにぷに星人",
+    "ぺろぺろキャンディ", "ぶーぶー豚さん", "みそしるおばけ", "でろでろスライム",
+    "名無しの権兵衛", "自称天才", "おこちゃま", "貧弱ちゃん", "ぽんこつロボ",
+]
+
+SECRET_CONFESS_TEMPLATES = [
+    "{target}、実はずっと好きだった…付き合ってください！",
+    "{target}さんのことが頭から離れません。私と付き合ってもらえませんか？",
+    "ずっと言えなかったけど…{target}のことが好きです！！",
+    "{target}へ。あなたに恋をしました。返事を待っています。",
+    "夜も眠れないくらい{target}のことばかり考えてる…好きです。",
+    "{target}、今まで隠してたけど、めちゃくちゃ好きだから付き合ってほしい。",
+]
+
+def _secret_random_member(guild: discord.Guild, exclude: set = None):
+    exclude = exclude or set()
+    candidates = [m for m in guild.members if not m.bot and m.id not in exclude]
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+async def _secret_get_webhook(channel: discord.TextChannel):
+    whs = await channel.webhooks()
+    wh = discord.utils.find(lambda w: w.name == "MamechosuSecret", whs)
+    if not wh:
+        wh = await channel.create_webhook(name="MamechosuSecret")
+    return wh
+
+async def _secret_impersonate(channel: discord.TextChannel, member: discord.Member, text: str):
+    wh = await _secret_get_webhook(channel)
+    avatar_url = member.display_avatar.url if member.display_avatar else member.default_avatar.url
+    await wh.send(content=text, username=member.display_name, avatar_url=avatar_url)
+
+async def _secret_past_meigen(channel: discord.TextChannel):
+    candidates = []
+    async for msg in channel.history(limit=300):
+        if msg.author.bot or not msg.content.strip():
+            continue
+        c = msg.content.strip()
+        if c.startswith("/") or c.startswith("http"):
+            continue
+        candidates.append(c)
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+async def _groq_generate_senryu(guild_id: int = None) -> str:
+    fallback = [
+        "秋の空　見上げてひとり　ため息す",
+        "夕焼けに　溶けてゆく日々　惜しみけり",
+        "風薫る　五月の空に　夢のせて",
+        "満員の　電車の中で　夢を見る",
+    ]
+    api_key = get_groq_api_key(guild_id)
+    if not api_key:
+        return random.choice(fallback)
+    prompt = (
+        "あなたは川柳作家です。\n"
+        "日常のおもしろい一場面を、五・七・五（17音）で表現した川柳を1句だけ作ってください。\n"
+        "出力は川柳の本文のみとし、説明や前置き、括弧、句読点以外の記号は不要です。"
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "openai/gpt-oss-120b",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 60,
+                    "temperature": 0.9,
+                },
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    raw = data["choices"][0]["message"]["content"].strip().strip("「」\"'")
+                    if raw:
+                        return raw
+    except Exception:
+        pass
+    return random.choice(fallback)
+
+@tasks.loop(minutes=5)
+async def secret_nick_revert_loop():
+    now = time.time()
+    for guild in bot.guilds:
+        data = db_read("secret_nick", guild_id=guild.id)
+        if not isinstance(data, dict) or not data:
+            continue
+        changed = False
+        for uid_str in list(data.keys()):
+            entry = data[uid_str]
+            if now < entry.get("revert_at", 0):
+                continue
+            member = guild.get_member(int(uid_str))
+            if member:
+                try:
+                    await member.edit(nick=entry.get("original"))
+                except Exception:
+                    pass
+            del data[uid_str]
+            changed = True
+        if changed:
+            db_write("secret_nick", data, guild_id=guild.id)
+
+@bot.tree.command(
+    name="secret",
+    description=(
+        "【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。"
+        "ランダムないたずらを1つだけ実行します（管理者専用）"
+    )
+)
+@app_commands.default_permissions(administrator=True)
+async def cmd_secret(interaction: discord.Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message("サーバー内でのみ使用できます。", ephemeral=True)
+        return
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            f"{SECRET_WARNING}\nこのコマンドの実行には管理者権限が必要です。", ephemeral=True
+        )
+        return
+
+    await safe_defer(interaction, ephemeral=True)
+    guild = interaction.guild
+    channel = interaction.channel
+
+    event = random.choice([
+        "timeout", "confess", "meigen", "senryu",
+        "rickroll", "obama", "nick", "lewd",
+    ])
+
+    try:
+        if event == "timeout":
+            member = _secret_random_member(guild)
+            if not member:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            await member.timeout(datetime.timedelta(minutes=5), reason="/secret")
+            await channel.send(f"{member.mention} が5分間タイムアウトになりました…！")
+
+        elif event == "confess":
+            confesser = _secret_random_member(guild)
+            if not confesser:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            target = _secret_random_member(guild, exclude={confesser.id})
+            if not target:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            text = random.choice(SECRET_CONFESS_TEMPLATES).format(target=target.mention)
+            await _secret_impersonate(channel, confesser, text)
+
+        elif event == "meigen":
+            member = _secret_random_member(guild)
+            if not member:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            quote = await _secret_past_meigen(channel)
+            if not quote:
+                await interaction.followup.send("過去の発言が見つかりませんでした。", ephemeral=True); return
+            await _secret_impersonate(channel, member, quote)
+
+        elif event == "senryu":
+            member = _secret_random_member(guild)
+            if not member:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            senryu = await _groq_generate_senryu(guild.id)
+            await _secret_impersonate(channel, member, senryu)
+
+        elif event == "rickroll":
+            await channel.send(SECRET_RICK_URL)
+
+        elif event == "obama":
+            emojis = []
+            obama_guild = bot.get_guild(OBAMA_GUILD_ID)
+            if obama_guild:
+                e = discord.utils.get(obama_guild.emojis, name="obama")
+                if e: emojis.append(e)
+                for i in range(1, 25):
+                    e = discord.utils.get(obama_guild.emojis, name=f"obama{i}")
+                    if e: emojis.append(e)
+            if emojis:
+                await channel.send(str(random.choice(emojis)))
+            else:
+                await channel.send(random.choice(SECRET_OBAMA_FALLBACK))
+
+        elif event == "nick":
+            member = _secret_random_member(guild)
+            if not member:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            data = db_read("secret_nick", guild_id=guild.id)
+            if not isinstance(data, dict):
+                data = {}
+            uid_str = str(member.id)
+            original = data[uid_str]["original"] if uid_str in data else member.nick
+            new_nick = random.choice(SECRET_NICKNAMES)
+            await member.edit(nick=new_nick)
+            data[uid_str] = {"original": original, "revert_at": time.time() + 3600}
+            db_write("secret_nick", data, guild_id=guild.id)
+            await channel.send(f"{member.mention} のニックネームが1時間だけ変わりました…！")
+
+        elif event == "lewd":
+            member = _secret_random_member(guild)
+            if not member:
+                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
+            text = random.choice(LEWD_REPLIES)
+            await _secret_impersonate(channel, member, text)
+
+        await interaction.followup.send(f"実行しました。(発生した現象: {event})", ephemeral=True)
+        db_log("secret_command", f"guild={guild.id} executor={interaction.user.id} event={event}")
+    except Exception as e:
+        await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
+        db_log("secret_command_error", f"guild={guild.id} | {e}", level="ERROR")
 
 # ──────────────────────────────────────────────
 # 22. AIチャット /chat (Groq + Webhook)
