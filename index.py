@@ -767,9 +767,9 @@ HELP_TEXT = {
         "**【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。**\n"
         "使い方: `/secret`\n"
         "**仕様:**\n"
-        "実行するたびに、以下からランダムで1つだけいたずらが発生します。\n"
+        "実行するたびに、ランダムで1つだけいたずらが発生します。\n"
         "結果は全員に見える形でチャンネルに公開されます。\n"
-        "必要権限: 管理者権限"
+        "必要権限: 管理者権限のみ"
     ),
 }
 
@@ -2917,12 +2917,36 @@ async def cmd_sakubun(interaction: discord.Interaction, theme: str, length: int 
     for chunk in [files[i:i+10] for i in range(0, len(files), 10)]:
         await interaction.followup.send(files=chunk)
 
-def build_haiku_image(parts: list[str]) -> Image.Image:
+_VERTICAL_EMOJI_PATTERN = re.compile(
+    r"(<a?:[^:>]+:\d+>)"
+    r"|"
+    r"([\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\U00002600-\U000027BF\U0001F1E0-\U0001F1FF]"
+    r"(?:\uFE0F|\u200D[\U0001F300-\U0001F9FF])*)"
+)
+
+def _split_vertical_tokens(text: str) -> list:
+    """縦書き描画用に文字列を1文字ずつ、絵文字はひとかたまりのトークンに分割する"""
+    tokens = []
+    last = 0
+    for m in _VERTICAL_EMOJI_PATTERN.finditer(text):
+        if m.start() > last:
+            tokens.extend(list(text[last:m.start()]))
+        tokens.append(m.group())
+        last = m.end()
+    if last < len(text):
+        tokens.extend(list(text[last:]))
+    return tokens
+
+def build_haiku_image(parts: list[str], emoji_images: dict = None) -> Image.Image:
     """
     縦書き・和紙風俳句カード。W=380 H=560 固定。
     最長句の文字数でフォントサイズ・char_hを動的計算し枠内に必ず収める。
+    絵文字（Unicode・カスタム）はダウンロード済み画像があれば画像として描画する。
     """
     import random as _rnd
+
+    if emoji_images is None:
+        emoji_images = {}
 
     W       = 380
     H       = 560
@@ -2937,8 +2961,9 @@ def build_haiku_image(parts: list[str]) -> Image.Image:
     FRAME_OUT = (180, 148, 92)
     FRAME_IN  = (212, 186, 132)
 
-    # 最長句の文字数からchar_h・font_sizeを動的決定
-    max_len   = max(len(p) for p in parts) if parts else 7
+    # 絵文字は1文字クラスタとして扱い、それを踏まえた最長句のトークン数でサイズを決定
+    token_lists = [_split_vertical_tokens(p) for p in parts]
+    max_len   = max((len(t) for t in token_lists), default=7) or 7
     avail_h   = H - TOP_Y - BOT_PAD        # 描画可能な縦幅 = 480
     char_h    = avail_h // max(max_len, 1)
     font_size = min(42, max(18, int(char_h * 0.80)))
@@ -2974,17 +2999,28 @@ def build_haiku_image(parts: list[str]) -> Image.Image:
     # 3列のX座標（右→中→左）
     col_xs = [W - PAD_X, W - PAD_X - COL_GAP, W - PAD_X - COL_GAP * 2]
 
-    # 縦書き3列
-    for col_idx, phrase in enumerate(parts):
+    # 縦書き3列（絵文字はダウンロード済み画像があれば画像として貼り付け）
+    for col_idx, tokens in enumerate(token_lists):
         cx = col_xs[col_idx]
         y  = TOP_Y
-        for ch_char in phrase:
+        for token in tokens:
             if y + font_size > H - BOT_PAD:  # 枠内に収まらなければ停止
                 break
-            draw.text((cx, y), ch_char, font=f_main, fill=INK, anchor="mt")
+            em_data = emoji_images.get(token)
+            if em_data:
+                try:
+                    em_img = Image.open(BytesIO(em_data)).convert("RGBA")
+                    em_img = em_img.resize((font_size, font_size), Image.Resampling.LANCZOS)
+                    img.paste(em_img, (cx - font_size // 2, y), mask=em_img)
+                    y += char_h
+                    continue
+                except Exception:
+                    pass
+            draw.text((cx, y), token, font=f_main, fill=INK, anchor="mt")
             y += char_h
 
     return img
+
 
 async def _groq_extract_haiku(text: str, guild_id: int = None) -> list[str] | None:
     """
@@ -3074,7 +3110,8 @@ async def check_haiku(message: discord.Message):
             # GROQがない場合のみローカル検出
             parts = split_into_phrases(text)
         if parts:
-            img = build_haiku_image(parts)
+            emoji_images = await _fetch_emoji_images("".join(parts), guild=message.guild)
+            img = build_haiku_image(parts, emoji_images=emoji_images)
             buf = BytesIO()
             img.save(buf, format="PNG")
             buf.seek(0)
@@ -4143,7 +4180,7 @@ def _clean_markdown_only(text: str) -> str:
     text = _re_md.sub(r"^>\s?", "", text, flags=_re_md.MULTILINE)
     return text.strip()
 
-_CUSTOM_EMOJI_PATTERN = _re_md.compile(r"<(a?):(\w+):(\d+)>")
+_CUSTOM_EMOJI_PATTERN = _re_md.compile(r"<(a?):([^:>]+):(\d+)>")
 
 async def _fetch_emoji_images(text: str, guild: "discord.Guild | None" = None) -> dict:
     """Unicode絵文字(Twemoji)とカスタム絵文字(Discord CDN)をダウンロード"""
@@ -4187,7 +4224,7 @@ def _split_for_render(text: str) -> list:
     """テキストを ('text', str) | ('emoji', str) のセグメントリストに分割。カスタム絵文字にも対応。"""
     import re as _re2
     combined = _re2.compile(
-        r"(<a?:\w+:\d+>)"
+        r"(<a?:[^:>]+:\d+>)"
         r"|"
         r"([🌀-🧿🨀-🫿☀-➿🇠-🇿]"
         r"+(?:️|‍[🌀-🧿])*)"
@@ -4212,6 +4249,35 @@ def _measure_seg(seg_type: str, content: str, font, emoji_size: int) -> int:
         return bb[2] - bb[0]
     except Exception:
         return len(content) * font.size
+
+def _draw_emoji_line(draw, img, text: str, font, cx: int, y: int, fill, emoji_images: dict, emoji_size: int = None):
+    """絵文字混在の1行テキストをcxを中心に描画する（絵文字はダウンロード済み画像があれば画像として貼り付け）"""
+    if emoji_images is None:
+        emoji_images = {}
+    if emoji_size is None:
+        emoji_size = max(getattr(font, "size", 18), 18)
+    segs = _split_for_render(text)
+    total_w = 0
+    for st, ct in segs:
+        total_w += _measure_seg(st, ct, font, emoji_size)
+    x = cx - total_w // 2
+    for st, ct in segs:
+        if st == "emoji":
+            em_data = emoji_images.get(ct)
+            if em_data:
+                try:
+                    em_img = Image.open(BytesIO(em_data)).convert("RGBA")
+                    em_img = em_img.resize((emoji_size, emoji_size), Image.Resampling.LANCZOS)
+                    img.paste(em_img, (x, y), mask=em_img)
+                    x += emoji_size + 2
+                    continue
+                except Exception:
+                    pass
+            draw.text((x, y), ct, font=font, fill=fill)
+            x += _measure_seg("text", ct, font, emoji_size)
+        else:
+            draw.text((x, y), ct, font=font, fill=fill)
+            x += _measure_seg("text", ct, font, emoji_size)
 
 def _wrap_mixed(text: str, font, emoji_size: int, max_width: int) -> list:
     """テキストを行ごとのセグメントリスト（list[list[tuple]]）に変換"""
@@ -4401,17 +4467,17 @@ def build_quote_image(text: str, author_name: str = "", avatar_bytes: bytes = b"
     username_font = load_font(17)
     ay = sep_y + 14
     if author_name:
-        draw.text((cx, ay), f"— {author_name}", font=author_font, fill=ACCENT, anchor="mt")
+        _draw_emoji_line(draw, img, f"— {author_name}", author_font, cx, ay, ACCENT, emoji_images)
         ay += 34
     if username:
-        draw.text((cx, ay), f"@{username}", font=username_font, fill=SUB, anchor="mt")
+        _draw_emoji_line(draw, img, f"@{username}", username_font, cx, ay, SUB, emoji_images)
 
     return img
 
 async def _make_quote_file(text: str, author_name: str, avatar_bytes: bytes = b"",
                            theme_name: str = "dark", guild: "discord.Guild | None" = None,
                            username: str = "", color: bool = False) -> discord.File:
-    emoji_images = await _fetch_emoji_images(text, guild=guild)
+    emoji_images = await _fetch_emoji_images(f"{text}\n{author_name}\n{username}", guild=guild)
     img = build_quote_image(text, author_name, avatar_bytes,
                             theme_name=theme_name, emoji_images=emoji_images, username=username,
                             color=color)
@@ -5200,20 +5266,34 @@ async def _secret_past_meigen(channel: discord.TextChannel):
         return None
     return random.choice(candidates)
 
-async def _groq_generate_senryu(guild_id: int = None) -> str:
-    fallback = [
-        "秋の空　見上げてひとり　ため息す",
-        "夕焼けに　溶けてゆく日々　惜しみけり",
-        "風薫る　五月の空に　夢のせて",
-        "満員の　電車の中で　夢を見る",
-    ]
+async def _secret_fetch_avatar_bytes(member: discord.Member) -> bytes:
+    try:
+        if member.display_avatar:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(member.display_avatar.url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+    except Exception:
+        pass
+    return b""
+
+SECRET_SENRYU_FALLBACK_PARTS = [
+    ["あきのそら", "みあげてひとり", "ためいきす"],
+    ["ゆうやけに", "とけてゆくひび", "おしみけり"],
+    ["かぜかおる", "ごがつのそらに", "ゆめのせて"],
+    ["まんいんの", "でんしゃのなかで", "ゆめをみる"],
+]
+
+async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
     api_key = get_groq_api_key(guild_id)
     if not api_key:
-        return random.choice(fallback)
+        return random.choice(SECRET_SENRYU_FALLBACK_PARTS)
     prompt = (
         "あなたは川柳作家です。\n"
-        "日常のおもしろい一場面を、五・七・五（17音）で表現した川柳を1句だけ作ってください。\n"
-        "出力は川柳の本文のみとし、説明や前置き、括弧、句読点以外の記号は不要です。"
+        "日常のおもしろい一場面を、五・七・五（17モーラ）で表現した川柳を1句だけ作ってください。\n"
+        "上の句(5モーラ)・中の句(7モーラ)・下の句(5モーラ)に厳密に区切れるものだけを作ること。\n"
+        "以下の形式だけで答えてください（説明不要）:\n"
+        "句1|句2|句3"
     )
     try:
         async with aiohttp.ClientSession() as session:
@@ -5230,12 +5310,13 @@ async def _groq_generate_senryu(guild_id: int = None) -> str:
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    raw = data["choices"][0]["message"]["content"].strip().strip("「」\"'")
-                    if raw:
-                        return raw
+                    raw = data["choices"][0]["message"]["content"].strip()
+                    parts = [p.strip() for p in raw.split("|")]
+                    if len(parts) == 3 and all(parts):
+                        return parts
     except Exception:
         pass
-    return random.choice(fallback)
+    return random.choice(SECRET_SENRYU_FALLBACK_PARTS)
 
 @tasks.loop(minutes=5)
 async def secret_nick_revert_loop():
@@ -5312,17 +5393,41 @@ async def cmd_secret(interaction: discord.Interaction):
             quote = await _secret_past_meigen(channel)
             if not quote:
                 await interaction.followup.send("過去の発言が見つかりませんでした。", ephemeral=True); return
-            await _secret_impersonate(channel, member, quote)
+            avatar_bytes = await _secret_fetch_avatar_bytes(member)
+            img_file = await _make_quote_file(
+                quote, member.display_name, avatar_bytes,
+                guild=guild, username=member.name
+            )
+            await channel.send(file=img_file)
 
         elif event == "senryu":
             member = _secret_random_member(guild)
             if not member:
                 await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
-            senryu = await _groq_generate_senryu(guild.id)
-            await _secret_impersonate(channel, member, senryu)
+            parts = await _groq_generate_senryu_parts(guild.id)
+            emoji_images = await _fetch_emoji_images("".join(parts), guild=guild)
+            img = build_haiku_image(parts, emoji_images=emoji_images)
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            wh = await _secret_get_webhook(channel)
+            avatar_url = member.display_avatar.url if member.display_avatar else member.default_avatar.url
+            await wh.send(
+                username=member.display_name, avatar_url=avatar_url,
+                file=discord.File(buf, "senryu.png")
+            )
 
         elif event == "rickroll":
-            await channel.send(SECRET_RICK_URL)
+            try:
+                async with aiohttp.ClientSession() as rs:
+                    async with rs.get(SECRET_RICK_URL, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            raw = await resp.read()
+                            await channel.send(file=discord.File(BytesIO(raw), filename="rick.gif"))
+                        else:
+                            await channel.send(SECRET_RICK_URL)
+            except Exception:
+                await channel.send(SECRET_RICK_URL)
 
         elif event == "obama":
             emojis = []
