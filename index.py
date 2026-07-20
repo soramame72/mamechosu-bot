@@ -767,8 +767,7 @@ HELP_TEXT = {
         "**【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。**\n"
         "使い方: `/secret`\n"
         "**仕様:**\n"
-        "実行するたびに、ランダムで1つだけいたずらが発生します。\n"
-        "結果は全員に見える形でチャンネルに公開されます。\n"
+        "実行するたびに、以下からランダムで1つだけいたずらが発生します。\n"
         "必要権限: 管理者権限のみ"
     ),
 }
@@ -5136,25 +5135,45 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
         will_expose = random.randint(1, 100) <= expose_rate
 
         if will_expose:
-            expose_msgs = [
-                f"ｷﾀ━━━━(ﾟ∀ﾟ)━━━━!!\nなりすまし犯人発見ｗｗｗｗｗｗｗｗｗ\n  ↑このメッセージ出したのコイツ → {interaction.user.mention} ｗｗｗ",
-                f"　　＿人人人人人人人＿\n　　＞  バ レ た ！ ＜\n　　￣Y^Y^Y^Y^Y^Y￣\n{interaction.user.mention} お前のなりすましバレバレやぞwwwwww 草不可避ｗｗｗｗ",
-                f"( ﾟ∀ﾟ)ｱﾊﾊ八八ﾉヽﾉヽﾉヽﾉ / \\\n{interaction.user.mention} がなりすまし失敗してて笑えるｗｗｗｗｗ\n恥ずかしくて死にたくなってそうｗｗｗ",
-                f"　∧_∧\n( ´∀｀) < {interaction.user.mention} がなりすまし！\n(　　)   こっちはとっくにバレてたｗｗｗ\n|  | |   ご苦労様でしたｗｗｗｗｗｗ",
-                f"wwwwwwwwwwwwwwwwww\n   {interaction.user.mention} の自作自演が完全にバレたｗｗｗｗｗ\nwwwwwwwwwwwwwwwwww\n哀れすぎてもう笑えないｗいや笑えるｗ",
-                f"m9(^Д^)ﾌﾟｷﾞｬｰ\n{interaction.user.mention} のなりすましダサすぎワロタｗｗｗｗｗ",
-                f"【悲報】 {interaction.user.mention} 氏、なりすましに失敗し無事死亡ｗｗｗｗｗｗ",
-                f"ﾌﾟｯ(※´Д｀※) \n{interaction.user.mention} が別人のフリしてるのバレてて草。息してる？ｗｗ",
-                f"はい、{interaction.user.mention} のなりすまし確定〜！\nみんなスクショ取れスクショ！！",
-                f"バレてやんの！ {interaction.user.mention} の自作自演だぞこれ！隠しきれると思った？ｗｗｗ",
-                f"(´・ω・`) {interaction.user.mention} のなりすまし…見てて辛いわ…",
-                f"おいおい、こいつ {interaction.user.mention} が他人のフリして喋ってるぞ！恥ずかしくないのか！ｗｗ",
-                f"正体現したね！ {interaction.user.mention} のなりすまし発言でしたー！",
-                f"うわぁ、{interaction.user.mention} がなりすましで喋ってる！見苦しいなあもう！",
-                f"ざぁぁぁこ！なりすましなんて姑息な手使って、まんまとバレてるのダサすぎでしょ！ {interaction.user.mention}",
-                f"＼(^o^)／ {interaction.user.mention} オワタ ＼(^o^)／\nなりすまし大失敗ｗｗｗｗ",
-                f"おーいみんなー！ {interaction.user.mention} がなりすまししてるぞー！指さして笑ってやれー！ｗｗｗ"
-            ]
+            is_self = (user.id == interaction.user.id)
+            if is_self:
+                expose_msgs = [
+                    f"あれ？ {interaction.user.mention} 自分で自分になりすまして何してんだこいつｗｗｗｗｗ",
+                    f"ちょ待てｗｗｗ {interaction.user.mention} が自分自身になりすましてて草生える",
+                    f"( ﾟДﾟ)　{interaction.user.mention} 、お前は一体誰になりすましたかったんだ…自分にか…",
+                    f"自演乙　{interaction.user.mention} 自分のフリして自分のフリするとかどういうこと？",
+                    f"むなしくないの…？ {interaction.user.mention} が自分自身になりすましてるんだが",
+                    f"　∧_∧\n( ´∀｀) < {interaction.user.mention} が自分で自分をなりすまし！\n(　　)   お前は何と戦ってるんだｗｗｗ\n|  | |",
+                    f"【悲報】{interaction.user.mention} さん、自分自身になりすましてしまう",
+                    f"えっ待って、{interaction.user.mention} が「{interaction.user.mention}のフリ」してる……何が楽しいの？ｗｗｗ",
+                    f"鏡かな？ {interaction.user.mention} が自分になりすましてるんですけどｗｗｗｗ",
+                    f"自分に変装した{interaction.user.mention}、変装として一番意味がないやつで草",
+                    f"哲学かな？ {interaction.user.mention} が自分自身のフリをしています",
+                    f"うわぁ、{interaction.user.mention} が自分で自分になりすましてる姿、シュールすぎて笑うわ",
+                    f"それただの{interaction.user.mention}じゃんｗｗｗなに一人でなりすましプレイしてんの",
+                    f"自分で自分になりすますとか{interaction.user.mention} 、才能の無駄遣いすぎるｗｗｗ",
+                    f"わざわざ自分になりすますとか、{interaction.user.mention} 暇すぎん…？",
+                ]
+            else:
+                expose_msgs = [
+                    f"ｷﾀ━━━━(ﾟ∀ﾟ)━━━━!!\nなりすまし犯人発見ｗｗｗｗｗｗｗｗｗ\n  ↑このメッセージ出したのコイツ → {interaction.user.mention} ｗｗｗ",
+                    f"　　＿人人人人人人人＿\n　　＞  バ レ た ！ ＜\n　　￣Y^Y^Y^Y^Y^Y￣\n{interaction.user.mention} お前のなりすましバレバレやぞwwwwww 草不可避ｗｗｗｗ",
+                    f"( ﾟ∀ﾟ)ｱﾊﾊ八八ﾉヽﾉヽﾉヽﾉ / \\\n{interaction.user.mention} がなりすまし失敗してて笑えるｗｗｗｗｗ\n恥ずかしくて死にたくなってそうｗｗｗ",
+                    f"　∧_∧\n( ´∀｀) < {interaction.user.mention} がなりすまし！\n(　　)   こっちはとっくにバレてたｗｗｗ\n|  | |   ご苦労様でしたｗｗｗｗｗｗ",
+                    f"wwwwwwwwwwwwwwwwww\n   {interaction.user.mention} の自作自演が完全にバレたｗｗｗｗｗ\nwwwwwwwwwwwwwwwwww\n哀れすぎてもう笑えないｗいや笑えるｗ",
+                    f"m9(^Д^)ﾌﾟｷﾞｬｰ\n{interaction.user.mention} のなりすましダサすぎワロタｗｗｗｗｗ",
+                    f"【悲報】 {interaction.user.mention} 氏、なりすましに失敗し無事死亡ｗｗｗｗｗｗ",
+                    f"ﾌﾟｯ(※´Д｀※) \n{interaction.user.mention} が別人のフリしてるのバレてて草。息してる？ｗｗ",
+                    f"はい、{interaction.user.mention} のなりすまし確定〜！\nみんなスクショ取れスクショ！！",
+                    f"バレてやんの！ {interaction.user.mention} の自作自演だぞこれ！隠しきれると思った？ｗｗｗ",
+                    f"(´・ω・`) {interaction.user.mention} のなりすまし…見てて辛いわ…",
+                    f"おいおい、こいつ {interaction.user.mention} が他人のフリして喋ってるぞ！恥ずかしくないのか！ｗｗ",
+                    f"正体現したね！ {interaction.user.mention} のなりすまし発言でしたー！",
+                    f"うわぁ、{interaction.user.mention} がなりすましで喋ってる！見苦しいなあもう！",
+                    f"ざぁぁぁこ！なりすましなんて姑息な手使って、まんまとバレてるのダサすぎでしょ！ {interaction.user.mention}",
+                    f"＼(^o^)／ {interaction.user.mention} オワタ ＼(^o^)／\nなりすまし大失敗ｗｗｗｗ",
+                    f"おーいみんなー！ {interaction.user.mention} がなりすまししてるぞー！指さして笑ってやれー！ｗｗｗ"
+                ]
             await sent_msg.reply(random.choice(expose_msgs))
 
         await interaction.followup.send(
