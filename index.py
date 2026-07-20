@@ -1114,15 +1114,24 @@ def _normalize_reaction_emoji(emoji_str: str):
         pass
     return emoji_str
 
+_CUSTOM_EMOJI_TAG = re.compile(r"^(<a?:[^:>]+:\d+>)\s*:\s*(.+)$")
+
 def parse_roles_and_emojis(guild, text: str):
     mapping = {}
     for part in text.split(","):
         part = part.strip()
-        if not part or ":" not in part: continue
-        emoji_str, role_str = part.split(":", 1)
-        emoji_str = emoji_str.strip()
-        role_str = role_str.strip()
-        
+        if not part: continue
+
+        m_custom = _CUSTOM_EMOJI_TAG.match(part)
+        if m_custom:
+            emoji_str = m_custom.group(1)
+            role_str = m_custom.group(2).strip()
+        else:
+            if ":" not in part: continue
+            emoji_str, role_str = part.split(":", 1)
+            emoji_str = emoji_str.strip()
+            role_str = role_str.strip()
+
         m = re.search(r"<@&(\d+)>", role_str)
         if m:
             role_id = int(m.group(1))
@@ -1161,7 +1170,7 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
             desc = "リアクションを押すことでロールを取得/解除できます。\n\n"
             for emoji_str, role_id in mapping.items():
                 r = guild.get_role(role_id)
-                if r: desc += f"{emoji_str} : {r.mention}\n"
+                if r: desc += f"{emoji_str}：{r.mention}\n"
             
             embed = discord.Embed(title=self.panel_title.value, description=desc, color=0x5865F2)
             if pw: embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
@@ -1794,7 +1803,11 @@ async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str,
         await interaction.followup.send("有効な「絵文字:ロール」のペアが見つかりません。例: `🍎:@Role1`", ephemeral=True)
         return
         
-    embed = discord.Embed(title=f"{title}", description="リアクションを押すことでロールを取得/解除できます。", color=0x5865F2)
+    embed = discord.Embed(title=f"{title}", description="リアクションを押すことでロールを取得/解除できます。\n\n" +
+                           "".join(f"{emoji_str}：{guild_role.mention}\n"
+                                    for emoji_str, role_id in mapping.items()
+                                    if (guild_role := interaction.guild.get_role(role_id))),
+                          color=0x5865F2)
     if password:
         embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
         
