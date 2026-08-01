@@ -324,6 +324,8 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to add GlobalChatTosView: {e}")
 
+    asyncio.create_task(_refresh_all_rolepanels())
+
     db_log("bot_start", f"user={bot.user} id={bot.user.id}")
 
     # AIチャットの永続化データの読み込み
@@ -422,10 +424,9 @@ HELP_TEXT = {
         "全6ページ構成で以下を管理できます:\n"
         "- 歓迎/送別メッセージ設定\n"
         "- 禁止ワード管理\n"
-        "- 認証パネル作成\n"
         "- 自動返信設定\n"
         "- グローバルチャット参加/退出\n"
-        "- ロールパネル作成\n"
+        "- ロールパネル作成・編集\n"
         "必要権限: チャンネル管理権限"
     ),
     "rolepanel": (
@@ -466,18 +467,6 @@ HELP_TEXT = {
         "- 絵文字・記号も登録可能\n"
         "- 部分一致で検出（例:「死」登録→「死ぬ」も対象）\n"
         "必要権限: チャンネル管理権限"
-    ),
-    "verify": (
-        "**荒らし対策の認証パネルを設置します。**\n"
-        "使い方: `/verify level:[1-10] role:[ロールID] channel:[チャンネル]`\n"
-        "**難易度レベル:**\n"
-        "- Lv1: ボタンを押すだけ\n"
-        "- Lv2: 「同意する」と入力\n"
-        "- Lv3: 一桁の計算\n"
-        "- Lv4: 二桁の計算\n"
-        "- Lv5〜10: 4〜16文字のランダムコード入力\n"
-        "認証成功で指定ロールを自動付与\n"
-        "必要権限: ロール管理権限"
     ),
     "autoreply": (
         "**特定ワードへの自動返信を設定します。**\n"
@@ -701,8 +690,9 @@ HELP_TEXT = {
     ),
     "impersonate": (
         "**指定したユーザーになりすまして発言します。**\n"
-        "使い方: `/impersonate user:[ユーザー] message:[発言内容] attachment:[画像]`\n"
-        "※一定確率で正体がバレる煽りメッセージが表示されます。\n"
+        "使い方: `/impersonate user:[ユーザー] message:[発言内容] attachment:[画像] reply_to:[メッセージID]`\n"
+        "- `reply_to` はこのチャンネル内のメッセージIDのみ指定可能（省略可）\n"
+        "- 一定確率でバレる。バレた場合、ネタばらしの返信ではなく、そのメッセージ自体の名前とアイコンが実行者本人のものに差し替わる\n"
         "必要権限: メッセージ管理権限"
     ),
     "impersonatechance": (
@@ -722,12 +712,14 @@ HELP_TEXT = {
     ),
     "rolepanel": (
         "**リアクション絵文字でロールを付与/剥奪できるパネルを作成します。**\n"
-        "使い方: `/rolepanel roles_and_emojis:[絵文字:ロール...] title:[タイトル] password:[パスワード(任意)]`\n"
+        "使い方: `/rolepanel roles_and_emojis:[絵文字:ロール...] title:[タイトル] subtitle:[任意] color:[任意] password:[任意]`\n"
         "**入力例:** `🍎:@Member, 🍇:@Gamer`\n"
         "**仕様:**\n"
         "- リアクションを押すと即座にロールが付与（再度押すと剥奪）\n"
         "- 自分のリアクションは即座に消去される\n"
         "- パスワード付きの場合はDMにボタンが届きそこから入力\n"
+        "- サブタイトルは任意で本文上部に表示（省略可）\n"
+        "- パネルの色は16進カラーコードで指定可能（例: `5865F2`、省略時はデフォルト色）\n"
         "- ロール名の隣に現在の人数が表示され、付与/剥奪のたびに自動更新\n"
         "- パネルに登録していない絵文字でリアクションされた場合は静かに削除される\n"
         "- Botが使用できない絵文字（Botが参加していないサーバーの絵文字等）が含まれる場合は作成後に警告を表示\n"
@@ -735,11 +727,11 @@ HELP_TEXT = {
     ),
     "rolepaneledit": (
         "**既存のロールパネルを編集します。**\n"
-        "使い方: `/rolepaneledit message_id:[メッセージID] roles_and_emojis:[絵文字:ロール...] title:[任意] password:[任意] remove_password:[任意]`\n"
+        "使い方: `/rolepaneledit message_id:[メッセージID] roles_and_emojis:[絵文字:ロール...] title:[任意] subtitle:[任意] color:[任意] password:[任意]`\n"
         "**仕様:**\n"
-        "- ロール構成を丸ごと新しい内容に置き換える（既存のリアクションは一旦クリアされ、新しい絵文字が付け直される）\n"
-        "- `title` / `password` を省略すると現在の設定を維持\n"
-        "- パスワードを解除したい場合は `remove_password:True` を指定\n"
+        "- `roles_and_emojis` を指定するとロール構成を丸ごと新しい内容に置き換える（既存のリアクションは一旦クリアされ、新しい絵文字が付け直される）\n"
+        "- `roles_and_emojis` を省略すると現在のロール構成を維持したまま表示設定だけ変更できる\n"
+        "- `title` / `subtitle`（`-` で削除） / `color`（16進） / `password`（`-` で解除） / `remove_password` はすべて省略可、省略時は現状維持\n"
         "- Botが使用できない絵文字が含まれる場合は編集後に警告を表示\n"
         "必要権限: ロール管理権限（`/rolepanel` と同じ）"
     ),
@@ -1088,35 +1080,6 @@ class AutoreplyAddModal(discord.ui.Modal, title="自動返信追加"):
             f"自動返信を追加: `{self.trigger.value}`", ephemeral=True)
 
 
-class VerifySetModal(discord.ui.Modal, title="認証パネル作成"):
-    level   = discord.ui.TextInput(label="保護レベル (1〜10)", placeholder="3")
-    role_id = discord.ui.TextInput(label="付与するロールID", placeholder="ロールを右クリック→IDをコピー")
-    def __init__(self, guild_id, channel_id): super().__init__(); self.gid = guild_id; self.cid = channel_id
-    async def on_submit(self, interaction):
-        try:
-            lv   = int(self.level.value.strip())
-            rid  = int(self.role_id.value.strip())
-            role = interaction.guild.get_role(rid)
-            if not role:
-                await interaction.response.send_message("ロールが見つかりません。", ephemeral=True); return
-            if not 1 <= lv <= 10:
-                await interaction.response.send_message("レベルは1〜10です。", ephemeral=True); return
-            ch = interaction.guild.get_channel(self.cid)
-            if not ch:
-                await interaction.response.send_message("チャンネルが見つかりません。", ephemeral=True); return
-            VERIFY_LEVELS = {1:"ボタンを押すだけ",2:"「同意する」と入力",3:"一桁の計算",
-                             4:"二桁の計算",5:"4文字コード",6:"6文字コード",7:"8文字コード",
-                             8:"10文字コード",9:"12文字コード",10:"16文字コード"}
-            embed = discord.Embed(title="認証パネル",
-                description=f"レベル {lv} / {VERIFY_LEVELS[lv]}\nボタンを押して認証してください。",
-                color=0xEB459E)
-            # VerifyView は後で定義されているのでここでは import 的に呼ぶ
-            await ch.send(embed=embed, view=VerifyView(lv, rid))
-            await interaction.response.send_message(
-                f"#{ch.name} に認証パネルを作成しました（レベル{lv}）。", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
-
 def _normalize_reaction_emoji(emoji_str: str):
     """カスタム絵文字の <:name:id> / <a:name:id> 形式を add_reaction が受け付ける形に正規化する。
     Unicode絵文字の場合はそのまま返す。"""
@@ -1162,13 +1125,22 @@ def parse_roles_and_emojis(guild, text: str):
             mapping[emoji_str] = role.id
     return mapping
 
-def _build_rolepanel_embed(guild, title: str, mapping: dict, password: str | None):
-    desc = "リアクションを押すことでロールを取得/解除できます。\n\n"
+def _parse_hex_color(s: str):
+    if not s: return None
+    s = s.strip().lstrip("#")
+    try:
+        return int(s, 16)
+    except ValueError:
+        return None
+
+def _build_rolepanel_embed(guild, title: str, mapping: dict, password: str | None,
+                            subtitle: str | None = None, color: int | None = None):
+    desc = f"{subtitle}\n\n" if subtitle else ""
     for emoji_str, role_id in mapping.items():
         r = guild.get_role(role_id)
         if r:
             desc += f"{emoji_str}：{r.mention}（{len(r.members)}人）\n"
-    embed = discord.Embed(title=title, description=desc, color=0x5865F2)
+    embed = discord.Embed(title=title, description=desc or "\u200b", color=color if color is not None else 0x5865F2)
     if password:
         embed.set_footer(text="このパネルはパスワード保護されています (DMに届きます)")
     return embed
@@ -1182,6 +1154,37 @@ async def _add_rolepanel_reactions(msg, mapping: dict) -> list:
             failed.append(emoji_str)
     return failed
 
+def _list_rolepanel_ids() -> list:
+    folder = os.path.join(DB_DIR, "reaction_roles")
+    if not os.path.isdir(folder):
+        return []
+    return [f[:-5] for f in os.listdir(folder) if f.endswith(".json")]
+
+async def _refresh_all_rolepanels():
+    await asyncio.sleep(5)
+    for mid_str in _list_rolepanel_ids():
+        try:
+            mid = int(mid_str)
+        except ValueError:
+            continue
+        panel_data = db_read("reaction_roles", shared=mid_str)
+        if not panel_data or not isinstance(panel_data, dict):
+            continue
+        guild = bot.get_guild(panel_data.get("guild_id"))
+        if not guild:
+            continue
+        channel = guild.get_channel_or_thread(panel_data.get("channel_id"))
+        if not channel:
+            continue
+        try:
+            msg = await channel.fetch_message(mid)
+            embed = _build_rolepanel_embed(guild, panel_data.get("title", "ロールパネル"), panel_data.get("roles", {}),
+                                            panel_data.get("password"), subtitle=panel_data.get("subtitle"), color=panel_data.get("color"))
+            await msg.edit(embed=embed)
+        except Exception as e:
+            db_log("rolepanel_refresh_failed", f"{mid_str}: {e}", level="WARN")
+        await asyncio.sleep(1)
+
 def _rolepanel_failed_warning(failed: list) -> str:
     if not failed:
         return ""
@@ -1192,6 +1195,8 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
     roles_input = discord.ui.TextInput(label="絵文字:ロールID をカンマ区切りで入力",
                                         placeholder="🍎:123456789, 🍇:987654321")
     panel_title = discord.ui.TextInput(label="パネルタイトル", default="ロールパネル")
+    subtitle    = discord.ui.TextInput(label="サブタイトル（省略可）", required=False)
+    color       = discord.ui.TextInput(label="色（16進 例:5865F2、省略可）", required=False)
     password    = discord.ui.TextInput(label="パスワード（省略可）", required=False)
     
     def __init__(self, guild_id, channel_id): super().__init__(); self.gid = guild_id; self.cid = channel_id
@@ -1206,10 +1211,13 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
                 await interaction.response.send_message("有効な「絵文字:ロール」のペアが見つかりません。", ephemeral=True); return
                 
             pw = self.password.value.strip() or None
-            embed = _build_rolepanel_embed(guild, self.panel_title.value, mapping, pw)
+            sub = self.subtitle.value.strip() or None
+            col = _parse_hex_color(self.color.value)
+            embed = _build_rolepanel_embed(guild, self.panel_title.value, mapping, pw, subtitle=sub, color=col)
             
             msg = await ch.send(embed=embed)
             db_write("reaction_roles", {"guild_id": guild.id, "channel_id": ch.id, "title": self.panel_title.value,
+                                         "subtitle": sub, "color": col,
                                          "roles": mapping, "password": pw}, shared=str(msg.id))
             failed = await _add_rolepanel_reactions(msg, mapping)
                 
@@ -1219,9 +1227,10 @@ class RolePanelModal(discord.ui.Modal, title="ロールパネル作成"):
 
 class RolePanelEditModal(discord.ui.Modal, title="ロールパネル編集"):
     message_id  = discord.ui.TextInput(label="編集するパネルのメッセージID")
-    roles_input = discord.ui.TextInput(label="絵文字:ロールID をカンマ区切りで入力",
+    roles_input = discord.ui.TextInput(label="絵文字:ロールID（空欄で現状維持）", required=False,
                                         placeholder="🍎:123456789, 🍇:987654321")
     panel_title = discord.ui.TextInput(label="パネルタイトル（空欄で維持）", required=False)
+    subtitle    = discord.ui.TextInput(label="サブタイトル（空欄で維持、削除は「-」）", required=False)
     password    = discord.ui.TextInput(label="パスワード（空欄で維持、解除は「-」）", required=False)
 
     def __init__(self, guild_id, channel_id): super().__init__(); self.gid = guild_id; self.cid = channel_id
@@ -1234,40 +1243,85 @@ class RolePanelEditModal(discord.ui.Modal, title="ロールパネル編集"):
             except ValueError:
                 await interaction.response.send_message("メッセージIDは数字で指定してください。", ephemeral=True); return
 
-            panel_data = db_read("reaction_roles", shared=str(mid))
-            if not panel_data or not isinstance(panel_data, dict) or panel_data.get("guild_id") != guild.id:
-                await interaction.response.send_message("指定したメッセージIDのロールパネルが見つかりません。", ephemeral=True); return
+            panel_data, channel, msg, err = await _resolve_rolepanel(guild, mid, self.cid)
+            if err:
+                await interaction.response.send_message(err, ephemeral=True); return
 
-            ch_id = panel_data.get("channel_id") or self.cid
-            channel = guild.get_channel_or_thread(ch_id)
-            if not channel:
-                await interaction.response.send_message("パネルのチャンネルが見つかりません。", ephemeral=True); return
-            try:
-                msg = await channel.fetch_message(mid)
-            except Exception:
-                await interaction.response.send_message("パネルのメッセージが見つかりません（削除された可能性があります）。", ephemeral=True); return
-
-            mapping = parse_roles_and_emojis(guild, self.roles_input.value)
-            if not mapping:
-                await interaction.response.send_message("有効な「絵文字:ロール」のペアが見つかりません。", ephemeral=True); return
+            roles_text = self.roles_input.value.strip()
+            if roles_text:
+                mapping = parse_roles_and_emojis(guild, roles_text)
+                if not mapping:
+                    await interaction.response.send_message("有効な「絵文字:ロール」のペアが見つかりません。", ephemeral=True); return
+                mapping_changed = True
+            else:
+                mapping = panel_data.get("roles", {})
+                mapping_changed = False
 
             new_title = self.panel_title.value.strip() or panel_data.get("title", "ロールパネル")
+            sub_input = self.subtitle.value.strip()
+            new_sub = None if sub_input == "-" else (sub_input or panel_data.get("subtitle"))
             pw_input = self.password.value.strip()
-            if pw_input == "-":
-                new_pw = None
-            elif pw_input:
-                new_pw = pw_input
-            else:
-                new_pw = panel_data.get("password")
+            if pw_input == "-": new_pw = None
+            elif pw_input: new_pw = pw_input
+            else: new_pw = panel_data.get("password")
 
-            embed = _build_rolepanel_embed(guild, new_title, mapping, new_pw)
+            embed = _build_rolepanel_embed(guild, new_title, mapping, new_pw, subtitle=new_sub, color=panel_data.get("color"))
             await msg.edit(embed=embed)
-            await msg.clear_reactions()
-            failed = await _add_rolepanel_reactions(msg, mapping)
+            failed = []
+            if mapping_changed:
+                await msg.clear_reactions()
+                failed = await _add_rolepanel_reactions(msg, mapping)
 
-            db_write("reaction_roles", {"guild_id": guild.id, "channel_id": channel.id, "title": new_title,
-                                         "roles": mapping, "password": new_pw}, shared=str(mid))
+            panel_data.update({"title": new_title, "subtitle": new_sub, "password": new_pw, "roles": mapping})
+            db_write("reaction_roles", panel_data, shared=str(mid))
             await interaction.response.send_message("ロールパネルを編集しました。" + _rolepanel_failed_warning(failed), ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
+
+class RolePanelDisplayEditModal(discord.ui.Modal, title="ロールパネル編集（表示設定）"):
+    message_id  = discord.ui.TextInput(label="編集するパネルのメッセージID")
+    panel_title = discord.ui.TextInput(label="タイトル（空欄で維持）", required=False)
+    subtitle    = discord.ui.TextInput(label="サブタイトル（空欄で維持、削除は「-」）", required=False)
+    color       = discord.ui.TextInput(label="色（16進 例:5865F2、空欄で維持）", required=False)
+    password    = discord.ui.TextInput(label="パスワード（空欄で維持、解除は「-」）", required=False)
+
+    def __init__(self, guild_id, channel_id): super().__init__(); self.gid = guild_id; self.cid = channel_id
+
+    async def on_submit(self, interaction):
+        try:
+            guild = interaction.guild
+            try:
+                mid = int(self.message_id.value.strip())
+            except ValueError:
+                await interaction.response.send_message("メッセージIDは数字で指定してください。", ephemeral=True); return
+
+            panel_data, channel, msg, err = await _resolve_rolepanel(guild, mid, self.cid)
+            if err:
+                await interaction.response.send_message(err, ephemeral=True); return
+
+            new_title = self.panel_title.value.strip() or panel_data.get("title", "ロールパネル")
+            sub_input = self.subtitle.value.strip()
+            new_sub = None if sub_input == "-" else (sub_input or panel_data.get("subtitle"))
+            col_input = self.color.value.strip()
+            color_invalid = False
+            if col_input:
+                parsed = _parse_hex_color(col_input)
+                color_invalid = parsed is None
+                new_col = parsed if parsed is not None else panel_data.get("color")
+            else:
+                new_col = panel_data.get("color")
+            pw_input = self.password.value.strip()
+            if pw_input == "-": new_pw = None
+            elif pw_input: new_pw = pw_input
+            else: new_pw = panel_data.get("password")
+
+            embed = _build_rolepanel_embed(guild, new_title, panel_data.get("roles", {}), new_pw, subtitle=new_sub, color=new_col)
+            await msg.edit(embed=embed)
+
+            panel_data.update({"title": new_title, "subtitle": new_sub, "color": new_col, "password": new_pw})
+            db_write("reaction_roles", panel_data, shared=str(mid))
+            warning = "\n⚠️ 指定された色の形式が無効なため、色は変更されませんでした。" if color_invalid else ""
+            await interaction.response.send_message("ロールパネルの表示設定を更新しました。" + warning, ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
 
@@ -1480,10 +1534,6 @@ class _BtnSettings(discord.ui.Button):
         embed = discord.Embed(title="現在の設定一覧", description="\n".join(lines), color=0x5865F2)
         await i.response.send_message(embed=embed, ephemeral=True)
 
-class _BtnCreateVerify(discord.ui.Button):
-    def __init__(self, gid, cid): super().__init__(label="認証パネル作成", style=discord.ButtonStyle.success, row=2); self.gid=gid; self.cid=cid
-    async def callback(self, i): await i.response.send_modal(VerifySetModal(self.gid, self.cid))
-
 class _BtnCreateRolePanel(discord.ui.Button):
     def __init__(self, gid, cid): super().__init__(label="ロールパネル作成", style=discord.ButtonStyle.success, row=2); self.gid=gid; self.cid=cid
     async def callback(self, i): await i.response.send_modal(RolePanelModal(self.gid, self.cid))
@@ -1494,6 +1544,13 @@ class _BtnEditRolePanel(discord.ui.Button):
         if not i.user.guild_permissions.manage_roles:
             await i.response.send_message("ロール管理権限が必要です。", ephemeral=True); return
         await i.response.send_modal(RolePanelEditModal(self.gid, self.cid))
+
+class _BtnEditRolePanelDisplay(discord.ui.Button):
+    def __init__(self, gid, cid): super().__init__(label="ロールパネル表示設定", style=discord.ButtonStyle.secondary, row=2); self.gid=gid; self.cid=cid
+    async def callback(self, i):
+        if not i.user.guild_permissions.manage_roles:
+            await i.response.send_message("ロール管理権限が必要です。", ephemeral=True); return
+        await i.response.send_modal(RolePanelDisplayEditModal(self.gid, self.cid))
 
 class _BtnGlobalChat(discord.ui.Button):
     def __init__(self, gid, cid): super().__init__(label="グローバルチャット", style=discord.ButtonStyle.primary, row=3); self.gid=gid; self.cid=cid
@@ -1655,7 +1712,8 @@ class _BtnImpersonateLog(discord.ui.Button):
         desc = ""
         for log in reversed(log_data[-10:]):
             dt = datetime.datetime.fromtimestamp(log["timestamp"]).strftime("%Y/%m/%d %H:%M")
-            desc += f"`{dt}` **{log['executor']}** → **{log['target']}**\n"
+            tag = "（バレ）" if log.get("exposed") else ""
+            desc += f"`{dt}` **{log['executor']}** → **{log['target']}**{tag}\n"
             desc += f"> {log['content'][:30]}\n"
             desc += f"[リンク]({log['url']})\n\n"
         embed.description = desc
@@ -1778,9 +1836,9 @@ class CPView(discord.ui.View):
             self.add_item(_BtnResource());         self.add_item(_BtnPermission())
             self.add_item(_BtnBackup(gid));        self.add_item(_BtnSettings(gid))
             ch = bot.get_channel(cid)
-            self.add_item(_BtnCreateVerify(gid, cid))
             self.add_item(_BtnCreateRolePanel(gid, cid))
             self.add_item(_BtnEditRolePanel(gid, cid))
+            self.add_item(_BtnEditRolePanelDisplay(gid, cid))
             self.add_item(_BtnGlobalChat(gid, cid))
             if ch:
                 self.add_item(_BtnPurge(ch))
@@ -1885,8 +1943,10 @@ class DMPasswordView(discord.ui.View):
         await interaction.response.send_modal(DMPasswordModal(self.guild_id, self.role_id, self.correct_pw))
 
 @bot.tree.command(name="rolepanel", description="ロールパネルを作成します")
-@app_commands.describe(roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2", title="タイトル", password="パスワード（省略可）")
-async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str, title: str = "ロールパネル", password: str = None):
+@app_commands.describe(roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2", title="タイトル", subtitle="サブタイトル（省略可）",
+                        color="パネルの色（16進 例:5865F2、省略可）", password="パスワード（省略可）")
+async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str, title: str = "ロールパネル",
+                         subtitle: str = None, color: str = None, password: str = None):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.followup.send("ロール管理権限が必要です。", ephemeral=True)
@@ -1896,22 +1956,42 @@ async def cmd_rolepanel(interaction: discord.Interaction, roles_and_emojis: str,
     if not mapping:
         await interaction.followup.send("有効な「絵文字:ロール」のペアが見つかりません。例: `🍎:@Role1`", ephemeral=True)
         return
-        
-    embed = _build_rolepanel_embed(interaction.guild, title, mapping, password)
+
+    col = _parse_hex_color(color)
+    embed = _build_rolepanel_embed(interaction.guild, title, mapping, password, subtitle=subtitle, color=col)
     msg = await interaction.channel.send(embed=embed)
 
     db_write("reaction_roles", {"guild_id": interaction.guild_id, "channel_id": interaction.channel_id, "title": title,
+                                 "subtitle": subtitle, "color": col,
                                  "roles": mapping, "password": password}, shared=str(msg.id))
     failed = await _add_rolepanel_reactions(msg, mapping)
 
     await interaction.followup.send("ロールパネルを作成しました。" + _rolepanel_failed_warning(failed), ephemeral=True)
 
+async def _resolve_rolepanel(guild, mid: int, fallback_channel_id: int):
+    panel_data = db_read("reaction_roles", shared=str(mid))
+    if not panel_data or not isinstance(panel_data, dict) or panel_data.get("guild_id") != guild.id:
+        return None, None, None, "指定したメッセージIDのロールパネルが見つかりません。"
+    ch_id = panel_data.get("channel_id") or fallback_channel_id
+    channel = guild.get_channel_or_thread(ch_id)
+    if not channel:
+        try: channel = await bot.fetch_channel(ch_id)
+        except Exception: return panel_data, None, None, "パネルのチャンネルが見つかりません。"
+    try:
+        msg = await channel.fetch_message(mid)
+    except Exception:
+        return panel_data, channel, None, "パネルのメッセージが見つかりません（削除された可能性があります）。"
+    return panel_data, channel, msg, None
+
 @bot.tree.command(name="rolepaneledit", description="既存のロールパネルを編集します")
-@app_commands.describe(message_id="編集するパネルのメッセージID", roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2",
-                        title="タイトル（省略時は現在のタイトルを維持）", password="パスワード（省略時は現在の設定を維持）",
+@app_commands.describe(message_id="編集するパネルのメッセージID",
+                        roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2（省略時はロール構成を維持）",
+                        title="タイトル（省略時は現在の設定を維持）", subtitle="サブタイトル（省略時は維持、削除は「-」）",
+                        color="パネルの色（16進 例:5865F2、省略時は維持）", password="パスワード（省略時は現在の設定を維持）",
                         remove_password="パスワード保護を解除する")
-async def cmd_rolepaneledit(interaction: discord.Interaction, message_id: str, roles_and_emojis: str,
-                             title: str = None, password: str = None, remove_password: bool = False):
+async def cmd_rolepaneledit(interaction: discord.Interaction, message_id: str, roles_and_emojis: str = None,
+                             title: str = None, subtitle: str = None, color: str = None,
+                             password: str = None, remove_password: bool = False):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.followup.send("ロール管理権限が必要です。", ephemeral=True)
@@ -1923,45 +2003,54 @@ async def cmd_rolepaneledit(interaction: discord.Interaction, message_id: str, r
         await interaction.followup.send("メッセージIDは数字で指定してください。", ephemeral=True)
         return
 
-    panel_data = db_read("reaction_roles", shared=str(mid))
-    if not panel_data or not isinstance(panel_data, dict) or panel_data.get("guild_id") != interaction.guild_id:
-        await interaction.followup.send("指定したメッセージIDのロールパネルが見つかりません。", ephemeral=True)
+    panel_data, channel, msg, err = await _resolve_rolepanel(interaction.guild, mid, interaction.channel_id)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
         return
 
-    ch_id = panel_data.get("channel_id") or interaction.channel_id
-    channel = interaction.guild.get_channel_or_thread(ch_id) or interaction.channel
-    try:
-        msg = await channel.fetch_message(mid)
-    except Exception:
-        await interaction.followup.send("パネルのメッセージが見つかりません（削除された可能性があります）。", ephemeral=True)
-        return
-
-    mapping = parse_roles_and_emojis(interaction.guild, roles_and_emojis)
-    if not mapping:
-        await interaction.followup.send("有効な「絵文字:ロール」のペアが見つかりません。例: `🍎:@Role1`", ephemeral=True)
-        return
+    if roles_and_emojis:
+        mapping = parse_roles_and_emojis(interaction.guild, roles_and_emojis)
+        if not mapping:
+            await interaction.followup.send("有効な「絵文字:ロール」のペアが見つかりません。例: `🍎:@Role1`", ephemeral=True)
+            return
+        mapping_changed = True
+    else:
+        mapping = panel_data.get("roles", {})
+        mapping_changed = False
 
     new_title = title if title is not None else panel_data.get("title", "ロールパネル")
-    if remove_password:
-        new_pw = None
-    elif password is not None:
-        new_pw = password
+    if subtitle == "-": new_sub = None
+    elif subtitle is not None: new_sub = subtitle
+    else: new_sub = panel_data.get("subtitle")
+    color_invalid = False
+    if color is not None:
+        parsed = _parse_hex_color(color)
+        color_invalid = parsed is None
+        new_col = parsed if parsed is not None else panel_data.get("color")
     else:
-        new_pw = panel_data.get("password")
+        new_col = panel_data.get("color")
+    if remove_password: new_pw = None
+    elif password is not None: new_pw = password
+    else: new_pw = panel_data.get("password")
 
-    embed = _build_rolepanel_embed(interaction.guild, new_title, mapping, new_pw)
+    embed = _build_rolepanel_embed(interaction.guild, new_title, mapping, new_pw, subtitle=new_sub, color=new_col)
     try:
         await msg.edit(embed=embed)
-        await msg.clear_reactions()
     except Exception as e:
         await interaction.followup.send(f"パネルの更新に失敗しました: {e}", ephemeral=True)
         return
 
-    failed = await _add_rolepanel_reactions(msg, mapping)
+    failed = []
+    if mapping_changed:
+        await msg.clear_reactions()
+        failed = await _add_rolepanel_reactions(msg, mapping)
 
     db_write("reaction_roles", {"guild_id": interaction.guild_id, "channel_id": channel.id, "title": new_title,
+                                 "subtitle": new_sub, "color": new_col,
                                  "roles": mapping, "password": new_pw}, shared=str(mid))
-    await interaction.followup.send("ロールパネルを編集しました。" + _rolepanel_failed_warning(failed), ephemeral=True)
+    warning = _rolepanel_failed_warning(failed)
+    if color_invalid: warning += "\n⚠️ 指定された色の形式が無効なため、色は変更されませんでした。"
+    await interaction.followup.send("ロールパネルを編集しました。" + warning, ephemeral=True)
 
 # ──────────────────────────────────────────────
 # 6. 歓迎・送別メッセージ
@@ -2098,7 +2187,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5)
                         except Exception: pass
                 if ch and msg:
-                    embed = _build_rolepanel_embed(guild, panel_data.get("title", "ロールパネル"), roles, pw)
+                    embed = _build_rolepanel_embed(guild, panel_data.get("title", "ロールパネル"), roles, pw,
+                                                    subtitle=panel_data.get("subtitle"), color=panel_data.get("color"))
                     try: await msg.edit(embed=embed)
                     except Exception: pass
             except Exception as e:
@@ -2492,84 +2582,6 @@ async def on_message(message: discord.Message):
         })
         if len(session["history"]) > 20:
             session["history"].pop(0)
-
-
-
-# ──────────────────────────────────────────────
-# 8. Verify認証
-# ──────────────────────────────────────────────
-VERIFY_LEVELS = {1:"ボタンを押すだけ",2:"「同意する」と入力",3:"一桁の計算",4:"二桁の計算",
-                 5:"4文字コード入力",6:"6文字コード入力",7:"8文字コード入力",
-                 8:"10文字コード入力",9:"12文字コード入力",10:"16文字コード入力"}
-
-async def _grant_role(interaction: discord.Interaction, role_id: int):
-    role = interaction.guild.get_role(role_id)
-    if role and role not in interaction.user.roles:
-        await interaction.user.add_roles(role)
-    await interaction.response.send_message("認証完了！ロールを付与しました。", ephemeral=True)
-
-class VerifyButton(discord.ui.Button):
-    def __init__(self, level: int, role_id: int):
-        super().__init__(label="認証する", style=discord.ButtonStyle.success, custom_id=f"verify_{role_id}_{level}")
-        self.level = level; self.role_id = role_id
-    async def callback(self, interaction: discord.Interaction):
-        lv = self.level
-        if lv == 1:
-            await _grant_role(interaction, self.role_id)
-        elif lv == 2:
-            await interaction.response.send_modal(AgreeModal(self.role_id))
-        elif lv <= 4:
-            a, b = random.randint(1, 9*(lv-1)+1), random.randint(1, 9)
-            await interaction.response.send_modal(MathModal(self.role_id, f"{a} + {b} = ?", str(a+b)))
-        else:
-            length = {5:4,6:6,7:8,8:10,9:12,10:16}.get(lv, 6)
-            await interaction.response.send_modal(CodeModal(self.role_id, gen_code(length)))
-
-class VerifyView(discord.ui.View):
-    def __init__(self, level: int, role_id: int):
-        super().__init__(timeout=None)
-        self.add_item(VerifyButton(level, role_id))
-
-class AgreeModal(discord.ui.Modal, title="同意確認"):
-    agree = discord.ui.TextInput(label="「同意する」と入力してください", placeholder="同意する")
-    def __init__(self, role_id): super().__init__(); self.role_id = role_id
-    async def on_submit(self, interaction):
-        if self.agree.value.strip() in ("同意する","同意"):
-            await _grant_role(interaction, self.role_id)
-        else:
-            await interaction.response.send_message("「同意する」と入力してください。", ephemeral=True)
-
-class MathModal(discord.ui.Modal, title="計算問題"):
-    answer_input = discord.ui.TextInput(label="答えを入力", placeholder="数字")
-
-
-
-
-
-class CodeModal(discord.ui.Modal, title="コード入力"):
-    code_input = discord.ui.TextInput(label="コードを入力")
-    def __init__(self, role_id, code):
-        super().__init__(); self.role_id = role_id; self.code = code
-        self.code_input.label = f"コードを入力: {code}"
-    async def on_submit(self, interaction):
-        if self.code_input.value.strip() == self.code:
-            await _grant_role(interaction, self.role_id)
-        else:
-            await interaction.response.send_message("コードが違います。", ephemeral=True)
-
-@bot.tree.command(name="verify", description="認証パネルを作成します")
-@app_commands.describe(level="保護レベル（1〜10）", role="認証成功時に付与するロール")
-async def cmd_verify(interaction: discord.Interaction, level: int, role: discord.Role):
-    await safe_defer(interaction, ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.followup.send("サーバー管理権限が必要です。", ephemeral=True)
-        return
-    if not 1 <= level <= 10:
-        await interaction.followup.send("レベルは1〜10で指定してください。", ephemeral=True)
-        return
-    embed = discord.Embed(title="認証パネル", description=f"レベル {level} / {VERIFY_LEVELS[level]}\nボタンを押して認証してください。", color=0xEB459E)
-    await interaction.channel.send(embed=embed, view=VerifyView(level, role.id))
-    await interaction.followup.send("認証パネルを作成しました。", ephemeral=True)
 
 # ──────────────────────────────────────────────
 # 9. 自動返信 /autoreply
@@ -5282,15 +5294,25 @@ async def cmd_romaji(interaction: discord.Interaction,
 # なりすまし (impersonate)
 # ──────────────────────────────────────────────
 @bot.tree.command(name="impersonate", description="指定したユーザーになりすまして発言します")
-@app_commands.describe(user="なりすますユーザー", message="発言するメッセージ", attachment="添付する画像等(省略可)")
+@app_commands.describe(user="なりすますユーザー", message="発言するメッセージ", attachment="添付する画像等(省略可)",
+                        reply_to="返信先メッセージID（このチャンネル内のメッセージのみ、省略可）")
 @app_commands.rename(user="ユーザー")
-async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, message: str, attachment: discord.Attachment = None):
+async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, message: str,
+                           attachment: discord.Attachment = None, reply_to: str = None):
     await safe_defer(interaction, ephemeral=True)
 
     gd = db_read("impersonate", guild_id=interaction.guild_id)
     if not (gd.get("server", True) or interaction.channel.id in gd.get("channels", [])):
         await interaction.followup.send("このチャンネルではなりすまし機能がOFFになっています。", ephemeral=True)
         return
+
+    ref_msg = None
+    if reply_to:
+        try:
+            ref_msg = await interaction.channel.fetch_message(int(reply_to.strip()))
+        except Exception:
+            await interaction.followup.send("返信先メッセージが見つかりません（このチャンネル内のメッセージIDを指定してください）。", ephemeral=True)
+            return
 
     try:
         # ユーザー情報を取得
@@ -5302,9 +5324,33 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
         wh = discord.utils.find(lambda w: w.name == "MamechosuImpersonate", whs)
         if not wh:
             wh = await interaction.channel.create_webhook(name="MamechosuImpersonate")
-            
+
+        content = message
+        if ref_msg:
+            quoted = ref_msg.content.replace("\n", " ")
+            if len(quoted) > 80: quoted = quoted[:80] + "…"
+            content = f"> **{ref_msg.author.display_name}**: {quoted}\n{message}"
+
         file = await attachment.to_file() if attachment else discord.utils.MISSING
-        sent_msg = await wh.send(content=message, username=name, avatar_url=avatar_url, wait=True, file=file)
+        sent_msg = await wh.send(content=content, username=name, avatar_url=avatar_url, wait=True, file=file)
+
+        # バレ确率を取得 (DBに保存されていなければデフォルト 10%)
+        expose_rate = gd.get("expose_rate", 10)  # 1〜100 の整数％10%=10
+        will_expose = random.randint(1, 100) <= expose_rate
+
+        if will_expose:
+            # ネタばらしの返信ではなく、メッセージ自体を実行者本人の名前とアイコンに差し替える
+            exec_avatar = interaction.user.display_avatar.url if interaction.user.display_avatar else interaction.user.default_avatar.url
+            exec_name = interaction.user.display_name
+            try:
+                await sent_msg.delete()
+            except Exception:
+                pass
+            reveal_kwargs = dict(content=content, username=exec_name, avatar_url=exec_avatar, wait=True)
+            if attachment:
+                try: reveal_kwargs["file"] = await attachment.to_file()
+                except Exception: pass
+            sent_msg = await wh.send(**reveal_kwargs)
 
         import time
         log_data = db_read("impersonate_log", guild_id=interaction.guild_id)
@@ -5315,60 +5361,15 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
             "executor": interaction.user.display_name,
             "target": name,
             "content": message,
+            "exposed": will_expose,
             "url": sent_msg.jump_url if sent_msg else "Unknown"
         })
         thirty_days_ago = time.time() - 30 * 24 * 60 * 60
         log_data = [log for log in log_data if log["timestamp"] > thirty_days_ago]
         db_write("impersonate_log", log_data, guild_id=interaction.guild_id)
 
-        # バレ确率を取得 (DBに保存されていなければデフォルト 10%)
-        expose_rate = gd.get("expose_rate", 10)  # 1〜100 の整数％10%=10
-        will_expose = random.randint(1, 100) <= expose_rate
-
-        if will_expose:
-            is_self = (user.id == interaction.user.id)
-            if is_self:
-                expose_msgs = [
-                    f"あれ？ {interaction.user.mention} 自分で自分になりすまして何してんだこいつｗｗｗｗｗ",
-                    f"ちょ待てｗｗｗ {interaction.user.mention} が自分自身になりすましてて草生える",
-                    f"( ﾟДﾟ)　{interaction.user.mention} 、お前は一体誰になりすましたかったんだ…自分にか…",
-                    f"自演乙　{interaction.user.mention} 自分のフリして自分のフリするとかどういうこと？",
-                    f"むなしくないの…？ {interaction.user.mention} が自分自身になりすましてるんだが",
-                    f"　∧_∧\n( ´∀｀) < {interaction.user.mention} が自分で自分をなりすまし！\n(　　)   お前は何と戦ってるんだｗｗｗ\n|  | |",
-                    f"【悲報】{interaction.user.mention} さん、自分自身になりすましてしまう",
-                    f"えっ待って、{interaction.user.mention} が「{interaction.user.mention}のフリ」してる……何が楽しいの？ｗｗｗ",
-                    f"鏡かな？ {interaction.user.mention} が自分になりすましてるんですけどｗｗｗｗ",
-                    f"自分に変装した{interaction.user.mention}、変装として一番意味がないやつで草",
-                    f"哲学かな？ {interaction.user.mention} が自分自身のフリをしています",
-                    f"うわぁ、{interaction.user.mention} が自分で自分になりすましてる姿、シュールすぎて笑うわ",
-                    f"それただの{interaction.user.mention}じゃんｗｗｗなに一人でなりすましプレイしてんの",
-                    f"自分で自分になりすますとか{interaction.user.mention} 、才能の無駄遣いすぎるｗｗｗ",
-                    f"わざわざ自分になりすますとか、{interaction.user.mention} 暇すぎん…？",
-                ]
-            else:
-                expose_msgs = [
-                    f"ｷﾀ━━━━(ﾟ∀ﾟ)━━━━!!\nなりすまし犯人発見ｗｗｗｗｗｗｗｗｗ\n  ↑このメッセージ出したのコイツ → {interaction.user.mention} ｗｗｗ",
-                    f"　　＿人人人人人人人＿\n　　＞  バ レ た ！ ＜\n　　￣Y^Y^Y^Y^Y^Y￣\n{interaction.user.mention} お前のなりすましバレバレやぞwwwwww 草不可避ｗｗｗｗ",
-                    f"( ﾟ∀ﾟ)ｱﾊﾊ八八ﾉヽﾉヽﾉヽﾉ / \\\n{interaction.user.mention} がなりすまし失敗してて笑えるｗｗｗｗｗ\n恥ずかしくて死にたくなってそうｗｗｗ",
-                    f"　∧_∧\n( ´∀｀) < {interaction.user.mention} がなりすまし！\n(　　)   こっちはとっくにバレてたｗｗｗ\n|  | |   ご苦労様でしたｗｗｗｗｗｗ",
-                    f"wwwwwwwwwwwwwwwwww\n   {interaction.user.mention} の自作自演が完全にバレたｗｗｗｗｗ\nwwwwwwwwwwwwwwwwww\n哀れすぎてもう笑えないｗいや笑えるｗ",
-                    f"m9(^Д^)ﾌﾟｷﾞｬｰ\n{interaction.user.mention} のなりすましダサすぎワロタｗｗｗｗｗ",
-                    f"【悲報】 {interaction.user.mention} 氏、なりすましに失敗し無事死亡ｗｗｗｗｗｗ",
-                    f"ﾌﾟｯ(※´Д｀※) \n{interaction.user.mention} が別人のフリしてるのバレてて草。息してる？ｗｗ",
-                    f"はい、{interaction.user.mention} のなりすまし確定〜！\nみんなスクショ取れスクショ！！",
-                    f"バレてやんの！ {interaction.user.mention} の自作自演だぞこれ！隠しきれると思った？ｗｗｗ",
-                    f"(´・ω・`) {interaction.user.mention} のなりすまし…見てて辛いわ…",
-                    f"おいおい、こいつ {interaction.user.mention} が他人のフリして喋ってるぞ！恥ずかしくないのか！ｗｗ",
-                    f"正体現したね！ {interaction.user.mention} のなりすまし発言でしたー！",
-                    f"うわぁ、{interaction.user.mention} がなりすましで喋ってる！見苦しいなあもう！",
-                    f"ざぁぁぁこ！なりすましなんて姑息な手使って、まんまとバレてるのダサすぎでしょ！ {interaction.user.mention}",
-                    f"＼(^o^)／ {interaction.user.mention} オワタ ＼(^o^)／\nなりすまし大失敗ｗｗｗｗ",
-                    f"おーいみんなー！ {interaction.user.mention} がなりすまししてるぞー！指さして笑ってやれー！ｗｗｗ"
-                ]
-            await sent_msg.reply(random.choice(expose_msgs))
-
         await interaction.followup.send(
-            "なりすましメッセージを送信しました。",
+            "なりすましメッセージを送信しました。" + ("（バレて実行者本人の名前で表示されました）" if will_expose else ""),
             ephemeral=True
         )
     except Exception as e:
