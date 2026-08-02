@@ -171,8 +171,18 @@ def _clear_password_attempt(user_id: int, role_id: int):
 def gen_code(length=8) -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
+def _clean_quote_text(text: str) -> str:
+    text = text or ""
+    text = re.sub(r"<a?:(\w+):\d+>", r":\1:", text)   # カスタム絵文字タグを短縮表記に（途中で切れて壊れるのを防ぐ）
+    text = re.sub(r"https?://\S+", "", text)          # 添付ファイル等のURLはラベルに出さない
+    try:
+        text = discord.utils.remove_markdown(text)     # **太字** ・ *斜体* ・ __下線__ ・ ~~取り消し線~~ ・ `コード` ・ ||スポイラー|| 等を除去
+    except Exception:
+        pass
+    return text.replace("\n", " ").strip()
+
 def _fake_reply_header(author_name: str, quoted_text: str, jump_url: str) -> str:
-    quoted = (quoted_text or "").replace("\n", " ").strip()
+    quoted = _clean_quote_text(quoted_text)
     if len(quoted) > 20:
         quoted = quoted[:20] + "..."
     label = quoted or "メッセージ"
@@ -5230,6 +5240,8 @@ async def relay_global_message(message: discord.Message):
                 ref_msg_obj = await message.channel.fetch_message(message.reference.message_id)
             ref_author_name = ref_msg_obj.author.display_name
             ref_quoted_text = ref_msg_obj.content
+            if not _clean_quote_text(ref_quoted_text) and ref_msg_obj.attachments:
+                ref_quoted_text = "[添付ファイル]"
         except Exception:
             ref_author_name = "不明なユーザー"
 
@@ -5496,7 +5508,10 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
 
         content = message
         if ref_msg:
-            content = f"{_fake_reply_header(ref_msg.author.display_name, ref_msg.content, ref_msg.jump_url)}\n{message}"
+            ref_quoted = ref_msg.content
+            if not _clean_quote_text(ref_quoted) and ref_msg.attachments:
+                ref_quoted = "[添付ファイル]"
+            content = f"{_fake_reply_header(ref_msg.author.display_name, ref_quoted, ref_msg.jump_url)}\n{message}"
 
         file = await attachment.to_file() if attachment else discord.utils.MISSING
         sent_msg = await wh.send(content=content, username=name, avatar_url=avatar_url, wait=True, file=file)
