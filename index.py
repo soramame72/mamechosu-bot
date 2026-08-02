@@ -39,6 +39,14 @@ GROQ_API_KEY   = env.get("GROQ_API_KEY", "")
 GITHUB_TOKEN   = env.get("GITHUB_TOKEN", "")
 AICHAT_API_KEY = env.get("AICHAT_API_KEY", "")
 
+# /log コマンドなど、Bot管理者専用機能を実行できるユーザーID
+BOT_ADMIN_IDS = {
+    1245961939377590306,
+    1356782727587954850,
+    1409115945040875580,
+    1385149368012767366,
+}
+
 # ──────────────────────────────────────────────
 # データ管理 (db/ フォルダ分散JSON)
 # ──────────────────────────────────────────────
@@ -163,6 +171,13 @@ def _clear_password_attempt(user_id: int, role_id: int):
 def gen_code(length=8) -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
+def _fake_reply_header(author_name: str, quoted_text: str, jump_url: str) -> str:
+    quoted = (quoted_text or "").replace("\n", " ").strip()
+    if len(quoted) > 20:
+        quoted = quoted[:20] + "..."
+    label = quoted or "メッセージ"
+    return f"-# <:reply0:1533130738785059036><:reply1:1533130833941102622>@{author_name}: [{label}](<{jump_url}>)"
+
 # ──────────────────────────────────────────────
 # Bot 初期化
 # ──────────────────────────────────────────────
@@ -224,6 +239,34 @@ async def cleanup_removed_guilds():
         removed.pop(gid, None)
     db_write("removed_guilds", removed, shared="index")
     db_log("cleanup_removed_guilds", f"deleted={to_delete}")
+
+# ──────────────────────────────────────────────
+# Groq レートリミット自動更新（meigen等を打たなくても定期的に取得）
+# ──────────────────────────────────────────────
+async def _refresh_groq_ratelimit():
+    api_key = GROQ_API_KEY or AICHAT_API_KEY
+    if not api_key:
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "openai/gpt-oss-120b", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                bot._groq_ratelimit = {
+                    "req_rem": resp.headers.get("x-ratelimit-remaining-requests", "N/A"),
+                    "req_lim": resp.headers.get("x-ratelimit-limit-requests", "N/A"),
+                    "tok_rem": resp.headers.get("x-ratelimit-remaining-tokens", "N/A"),
+                    "tok_lim": resp.headers.get("x-ratelimit-limit-tokens", "N/A"),
+                }
+    except Exception as e:
+        db_log("groq_ratelimit_refresh_failed", str(e), level="WARN")
+
+@tasks.loop(minutes=10)
+async def task_refresh_groq_ratelimit():
+    await _refresh_groq_ratelimit()
 
 # ──────────────────────────────────────────────
 # ランキング用キャッシュと保存タスク（VCのみ）
@@ -317,6 +360,9 @@ async def on_ready():
     except: pass
     try:
         secret_nick_revert_loop.start()
+    except: pass
+    try:
+        task_refresh_groq_ratelimit.start()
     except: pass
 
     try:
@@ -501,7 +547,14 @@ HELP_TEXT = {
         "- CPU使用率 / メモリ使用率（使用量/総量）\n"
         "- ストレージ使用率\n"
         "- Groq API残りリクエスト数・トークン数\n"
+        "- index.py 最終更新日時\n"
         "- Bot稼働サーバー数"
+    ),
+    "log": (
+        "**Botのログ（db/bot.log）をページ表示します。**\n"
+        "使い方: `/log`\n"
+        "ボタンでページ送りができます（実行者のみ操作可能）。\n"
+        "必要権限: Bot管理者専用（登録済みユーザーIDのみ実行可）"
     ),
     "save": (
         "**サーバー構成をバックアップします。**\n"
@@ -2159,7 +2212,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if role >= guild.me.top_role:
             if ch:
                 try:
-                    await ch.send(f"{member.mention} 権限エラー: Botのロール ({guild.me.top_role.name}) より上位のロールは操作できません。", delete_after=10)
+                    await ch.send(f"{member.mention} 権限エラー: Botのロール ({guild.me.top_role.name}) より上位のロールは操作できません。", delete_after=10, silent=True)
                 except Exception:
                     pass
             return
@@ -2171,7 +2224,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             except discord.Forbidden:
                 if ch:
                     try:
-                        await ch.send(f"{member.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてもう一度お試しください。", delete_after=10)
+                        await ch.send(f"{member.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてもう一度お試しください。", delete_after=10, silent=True)
                     except Exception:
                         pass
         else:
@@ -2179,12 +2232,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 if role in member.roles:
                     await member.remove_roles(role)
                     if ch:
-                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を外しました。", delete_after=5)
+                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を外しました。", delete_after=5, silent=True)
                         except Exception: pass
                 else:
                     await member.add_roles(role)
                     if ch:
-                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5)
+                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5, silent=True)
                         except Exception: pass
                 if ch and msg:
                     embed = _build_rolepanel_embed(guild, panel_data.get("title", "ロールパネル"), roles, pw,
@@ -2339,7 +2392,7 @@ class FakeResponse:
             view = ModalProxyView(modal)
             await self.message.channel.send(
                 f"{self.message.author.mention} 互換モード（~コマンド）では直接入力画面を表示できません。\n以下のボタンから入力画面を開いてください。",
-                view=view, delete_after=120)
+                view=view, delete_after=120, silent=True)
         except Exception:
             pass
 
@@ -2518,7 +2571,7 @@ async def on_message(message: discord.Message):
                 await message.delete()
                 await message.channel.send(
                     f"{message.author.mention} 禁止ワードが含まれていたため削除しました。",
-                    delete_after=5)
+                    delete_after=5, silent=True)
             except Exception:
                 pass
             return
@@ -3393,6 +3446,13 @@ async def build_resource_embed(client: discord.Client) -> discord.Embed:
     tok_lim = gl.get("tok_lim", "N/A")
     embed.add_field(name="Groq API", value=f"{req_rem} / {req_lim}", inline=True)
     embed.add_field(name="Groq API (Tokens)",   value=f"{tok_rem} / {tok_lim}", inline=True)
+
+    try:
+        mtime = os.path.getmtime(os.path.abspath(__file__))
+        mtime_str = datetime.datetime.fromtimestamp(mtime).strftime("%Y/%m/%d %H:%M")
+    except Exception:
+        mtime_str = "N/A"
+    embed.add_field(name="index.py 最終更新", value=mtime_str, inline=True)
     return embed
 
 @bot.tree.command(name="resource", description="サーバーのリソース状態を確認します")
@@ -3400,6 +3460,66 @@ async def cmd_resource(interaction: discord.Interaction):
     await safe_defer(interaction, ephemeral=True)
     embed = await build_resource_embed(bot)
     await interaction.followup.send(embed=embed)
+
+# ──────────────────────────────────────────────
+# /log（Bot管理者専用）
+# ──────────────────────────────────────────────
+LOG_LINES_PER_PAGE = 10
+
+def _read_bot_log_lines() -> list:
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_DIR, "bot.log")
+    if not os.path.exists(log_path):
+        return []
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    return [l.rstrip("\n")[:180] for l in lines if l.strip()]
+
+class LogView(discord.ui.View):
+    def __init__(self, lines: list, user_id: int, page: int = 0):
+        super().__init__(timeout=180)
+        self.lines = lines
+        self.user_id = user_id
+        self.page = page
+        self.max_page = max(0, (len(lines) - 1) // LOG_LINES_PER_PAGE)
+        self._update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.page <= 0
+        self.next_btn.disabled = self.page >= self.max_page
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * LOG_LINES_PER_PAGE
+        chunk = self.lines[start:start + LOG_LINES_PER_PAGE]
+        desc = "```\n" + "\n".join(chunk) + "\n```" if chunk else "ログがありません。"
+        embed = discord.Embed(title="Bot Log", description=desc, color=0x5865F2)
+        embed.set_footer(text=f"ページ {self.page + 1} / {self.max_page + 1} / 全{len(self.lines)}行")
+        return embed
+
+    @discord.ui.button(label="◀ 前へ", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="次へ ▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.max_page, self.page + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+@bot.tree.command(name="log", description="Botのログを表示します（Bot管理者専用）")
+async def cmd_log(interaction: discord.Interaction):
+    await safe_defer(interaction, ephemeral=True)
+    if interaction.user.id not in BOT_ADMIN_IDS:
+        await interaction.followup.send("このコマンドを実行する権限がありません。", ephemeral=True)
+        return
+    lines = _read_bot_log_lines()
+    lines.reverse()
+    view = LogView(lines, interaction.user.id)
+    await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True)
 
 # ──────────────────────────────────────────────
 # 13. バックアップと復元
@@ -4941,6 +5061,25 @@ def get_global_channels() -> list:
 def set_global_channels(channels: list):
     db_write("globalchat", channels, shared="channels")
 
+_GC_MSGMAP_TTL = 6 * 3600  # 6時間で古い返信マッピングは破棄
+
+def _gc_msgmap_get(msg_id: int) -> dict | None:
+    store = db_read("globalchat_msgmap", shared="index")
+    if not isinstance(store, dict):
+        return None
+    entry = store.get(str(msg_id))
+    return entry.get("channels") if entry else None
+
+def _gc_msgmap_put_all(channel_map: dict):
+    store = db_read("globalchat_msgmap", shared="index")
+    if not isinstance(store, dict):
+        store = {}
+    now = time.time()
+    for mid in channel_map.values():
+        store[str(mid)] = {"channels": channel_map, "ts": now}
+    store = {k: v for k, v in store.items() if now - v.get("ts", 0) < _GC_MSGMAP_TTL}
+    db_write("globalchat_msgmap", store, shared="index")
+
 async def get_or_create_webhook(channel: discord.TextChannel):
     try:
         for h in await channel.webhooks():
@@ -4984,7 +5123,7 @@ async def relay_global_message(message: discord.Message):
         try:
             await message.channel.send(
                 f"{message.author.mention} グローバルチャットではメンション（ユーザー・everyone/here・ロール）を送信できません。",
-                delete_after=8)
+                delete_after=8, silent=True)
         except: pass
         return
 
@@ -5016,7 +5155,7 @@ async def relay_global_message(message: discord.Message):
         )
         view = GlobalChatTosView()
         try:
-            await message.channel.send(f"{message.author.mention}\n{tos_text}", view=view, delete_after=120)
+            await message.channel.send(f"{message.author.mention}\n{tos_text}", view=view, delete_after=120, silent=True)
         except Exception:
             pass
         return
@@ -5038,13 +5177,13 @@ async def relay_global_message(message: discord.Message):
             try:
                 await message.channel.send(
                     f"{message.author.mention} [警告] 連投スパムが検出されたため、5分間グローバルチャットの利用を一時停止（ブロック）しました。",
-                    delete_after=8)
+                    delete_after=8, silent=True)
             except: pass
         else:
             try:
                 await message.channel.send(
                     f"{message.author.mention} [警告] グローバルチャットへの送信速度が早すぎます。少し時間をおいてから送信してください。",
-                    delete_after=8)
+                    delete_after=8, silent=True)
             except: pass
         return
     
@@ -5058,7 +5197,7 @@ async def relay_global_message(message: discord.Message):
         try:
             await message.channel.send(
                 f"{message.author.mention} [警告] 10秒以内に同じ内容のメッセージを連投することはできません。",
-                delete_after=8)
+                delete_after=8, silent=True)
         except: pass
         return
 
@@ -5077,20 +5216,50 @@ async def relay_global_message(message: discord.Message):
 
     content = (message.content or "") + "".join(f"\n{a.url}" for a in message.attachments)
     if not content.strip() or content.startswith("http"): return
+
+    ref_channels_map = None
+    ref_author_name = None
+    ref_quoted_text = None
+    if message.reference and message.reference.message_id:
+        ref_channels_map = _gc_msgmap_get(message.reference.message_id)
+        if not ref_channels_map:
+            ref_channels_map = {str(message.channel.id): message.reference.message_id}
+        try:
+            ref_msg_obj = message.reference.resolved
+            if not isinstance(ref_msg_obj, discord.Message):
+                ref_msg_obj = await message.channel.fetch_message(message.reference.message_id)
+            ref_author_name = ref_msg_obj.author.display_name
+            ref_quoted_text = ref_msg_obj.content
+        except Exception:
+            ref_author_name = "不明なユーザー"
+
     uname  = f"{message.author.display_name} @ {message.guild.name}"
     avatar = message.author.display_avatar.url
+    sent_ids = {str(message.channel.id): message.id}
     async with aiohttp.ClientSession() as session:
         for c in channels:
             if c["channel_id"] == message.channel.id: continue
+            body = content[:2000]
+            if ref_channels_map:
+                target_mid = ref_channels_map.get(str(c["channel_id"]))
+                if target_mid:
+                    jump = f"https://discord.com/channels/{c['guild_id']}/{c['channel_id']}/{target_mid}"
+                    header = _fake_reply_header(ref_author_name or "不明なユーザー", ref_quoted_text, jump)
+                    body = f"{header}\n{body}"[:2000]
             try:
-                async with session.post(c["webhook_url"],
-                    json={"username": uname, "avatar_url": avatar, "content": content[:2000],
+                async with session.post(c["webhook_url"] + "?wait=true",
+                    json={"username": uname, "avatar_url": avatar, "content": body,
                           "allowed_mentions": {"parse": []}},
                     timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status == 404:
                         remaining = [x for x in get_global_channels() if x.get("webhook_url") != c["webhook_url"]]
                         set_global_channels(remaining)
+                    elif resp.status in (200, 201):
+                        data = await resp.json()
+                        if data.get("id"):
+                            sent_ids[str(c["channel_id"])] = int(data["id"])
             except Exception: pass
+    _gc_msgmap_put_all(sent_ids)
 
 @bot.tree.command(name="globalchat", description="グローバルチャットの参加/退出を管理します")
 @app_commands.describe(action="join=参加 / leave=退出 / list=一覧")
@@ -5327,9 +5496,7 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
 
         content = message
         if ref_msg:
-            quoted = ref_msg.content.replace("\n", " ")
-            if len(quoted) > 80: quoted = quoted[:80] + "…"
-            content = f"> **{ref_msg.author.display_name}**: {quoted}\n{message}"
+            content = f"{_fake_reply_header(ref_msg.author.display_name, ref_msg.content, ref_msg.jump_url)}\n{message}"
 
         file = await attachment.to_file() if attachment else discord.utils.MISSING
         sent_msg = await wh.send(content=content, username=name, avatar_url=avatar_url, wait=True, file=file)
@@ -5368,10 +5535,7 @@ async def cmd_impersonate(interaction: discord.Interaction, user: discord.User, 
         log_data = [log for log in log_data if log["timestamp"] > thirty_days_ago]
         db_write("impersonate_log", log_data, guild_id=interaction.guild_id)
 
-        await interaction.followup.send(
-            "なりすましメッセージを送信しました。" + ("（バレて実行者本人の名前で表示されました）" if will_expose else ""),
-            ephemeral=True
-        )
+        await interaction.followup.send("なりすましメッセージを送信しました。", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
 
@@ -5826,11 +5990,11 @@ async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: s
                     err_text = await res.text()
                     if channel_id:
                         ch = bot.get_channel(channel_id)
-                        if ch: await ch.send(f"[警告] Groq API Error ({res.status}): `{err_text[:100]}`", delete_after=10)
+                        if ch: await ch.send(f"[警告] Groq API Error ({res.status}): `{err_text[:100]}`", delete_after=10, silent=True)
     except Exception as e:
         if channel_id:
             ch = bot.get_channel(channel_id)
-            if ch: await ch.send(f"[警告] Chat Exception: `{str(e)[:100]}`", delete_after=10)
+            if ch: await ch.send(f"[警告] Chat Exception: `{str(e)[:100]}`", delete_after=10, silent=True)
     return ""
 
 async def _chat_loop(channel_id: int):
