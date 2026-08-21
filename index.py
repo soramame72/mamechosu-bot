@@ -175,18 +175,23 @@ def _clean_quote_text(text: str) -> str:
     text = text or ""
     text = re.sub(r"<a?:(\w+):\d+>", r":\1:", text)   # カスタム絵文字タグを短縮表記に（途中で切れて壊れるのを防ぐ）
     text = re.sub(r"https?://\S+", "", text)          # 添付ファイル等のURLはラベルに出さない
-    try:
-        text = discord.utils.remove_markdown(text)     # **太字** ・ *斜体* ・ __下線__ ・ ~~取り消し線~~ ・ `コード` ・ ||スポイラー|| 等を除去
-    except Exception:
-        pass
     return text.replace("\n", " ").strip()
 
+def _safe_truncate_markdown(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for tok in ("**", "__", "~~", "||", "`"):          # 途中で切れて閉じタグが無くなったMarkdownを閉じる
+        if cut.count(tok) % 2 == 1:
+            cut += tok
+    return cut + "..."
+
 def _fake_reply_header(author_name: str, quoted_text: str, jump_url: str) -> str:
-    quoted = _clean_quote_text(quoted_text)
-    if len(quoted) > 20:
-        quoted = quoted[:20] + "..."
-    label = quoted or "メッセージ"
-    return f"-# <:reply0:1533130738785059036><:reply1:1533130833941102622>@{author_name}: [{label}](<{jump_url}>)"
+    # Discordのマスクリンク [label](url) 内ではMarkdownが描画されないため、
+    # 引用文はリンクの外側に平文として置き、実際にMarkdownが適用されるようにする
+    quoted = _safe_truncate_markdown(_clean_quote_text(quoted_text), 20)
+    suffix = f" {quoted}" if quoted else ""
+    return f"-# <:reply0:1533130738785059036><:reply1:1533130833941102622>@{author_name}: [メッセージ](<{jump_url}>){suffix}"
 
 # ──────────────────────────────────────────────
 # Bot 初期化
@@ -522,6 +527,12 @@ HELP_TEXT = {
         "- 登録したワードを含むメッセージは自動削除\n"
         "- 絵文字・記号も登録可能\n"
         "- 部分一致で検出（例:「死」登録→「死ぬ」も対象）\n"
+        "- ON/OFFの適用範囲は `/wordblockset` で設定\n"
+        "必要権限: メッセージ管理権限"
+    ),
+    "wordblockset": (
+        "**禁止ワード機能のON/OFFを切り替えます。**\n"
+        "使い方: `/wordblockset scope:[channel/server] state:[ON/OFF] channel:[対象]`\n"
         "必要権限: チャンネル管理権限"
     ),
     "autoreply": (
@@ -531,6 +542,12 @@ HELP_TEXT = {
         "- トリガーワードを含むメッセージにBotが自動返信\n"
         "- 返信テキストと任意のリアクション絵文字を設定可能\n"
         "- トリガーは部分一致\n"
+        "- ON/OFFの適用範囲は `/autoreplyset` で設定\n"
+        "必要権限: メッセージ管理権限"
+    ),
+    "autoreplyset": (
+        "**自動返信機能のON/OFFを切り替えます。**\n"
+        "使い方: `/autoreplyset scope:[channel/server] state:[ON/OFF] channel:[対象]`\n"
         "必要権限: チャンネル管理権限"
     ),
     "reaction": (
@@ -1587,8 +1604,8 @@ class _BtnSettings(discord.ui.Button):
         lines = [
             f"歓迎ch: {i.guild.get_channel(wch).mention if wch and i.guild.get_channel(wch) else '未設定'}",
             f"送別ch: {i.guild.get_channel(fch).mention if fch and i.guild.get_channel(fch) else '未設定'}",
-            f"禁止ワード: {len(wb.get('words',[]))}件",
-            f"自動返信: {len(ar.get('replies',{}))}件",
+            f"禁止ワード: {len(wb.get('words',[]))}件 (適用ch: {len(wb.get('channels',[]))}件" + (" +全体)" if wb.get("server", True) else ")"),
+            f"自動返信: {len(ar.get('replies',{}))}件 (適用ch: {len(ar.get('channels',[]))}件" + (" +全体)" if ar.get("server", True) else ")"),
             f"川柳検出ch: {len(hk.get('channels',[]))}件" + (" +全体" if hk.get("server") else ""),
             f"えっち検出ch: {len(lw.get('channels',[]))}件" + (" +全体" if lw.get("server") else ""),
             f"熱盛検知ch: {len(am.get('channels',[]))}件" + (" +全体" if am.get("server") else ""),
@@ -2341,6 +2358,33 @@ async def cmd_wordblock(interaction: discord.Interaction, action: str, word: str
         text = "\n".join(blocked) if blocked else "なし"
         await interaction.followup.send(f"禁止ワード一覧:\n{text}", ephemeral=True)
 
+@bot.tree.command(name="wordblockset", description="禁止ワード機能のON/OFFを切り替えます")
+@app_commands.describe(scope="channel=このチャンネルのみ / server=サーバー全体", state="ON / OFF",
+                       channel="対象チャンネル（省略=実行チャンネル）")
+async def cmd_wordblockset(interaction: discord.Interaction,
+                       scope: str = "channel", state: str = "ON",
+                       channel: discord.TextChannel = None):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
+        return
+    gd = db_read("wordblock", guild_id=interaction.guild_id)
+    on = state.upper() == "ON"
+    if scope == "server":
+        gd["server"] = on
+        msg = f"サーバー全体の禁止ワード機能を {'ON' if on else 'OFF'} にしました。"
+    else:
+        target = channel or interaction.channel
+        chs = gd.get("channels", [])
+        if on and target.id not in chs:
+            chs.append(target.id)
+        elif not on and target.id in chs:
+            chs.remove(target.id)
+        gd["channels"] = chs
+        msg = f"{target.mention} の禁止ワード機能を {'ON' if on else 'OFF'} にしました。"
+    db_write("wordblock", gd, guild_id=interaction.guild_id)
+    await interaction.followup.send(msg, ephemeral=True)
+
 # ──────────────────────────────────────────────
 # on_voice_state_update (VC滞在時間の計測)
 # ──────────────────────────────────────────────
@@ -2573,18 +2617,19 @@ async def on_message(message: discord.Message):
     # 禁止ワード (大文字小文字無視・単語境界考慮)
     content_lower = message.content.lower()
     wb_data = db_read("wordblock", guild_id=message.guild.id)
-    for word in wb_data.get("words", []):
-        w = word.lower()
-        # 日本語はどこに含まれてもNGで、英字は単語境界を考慮
-        if re.search(r'\b' + re.escape(w) + r'\b', content_lower) if w.isascii() else (w in content_lower):
-            try:
-                await message.delete()
-                await message.channel.send(
-                    f"{message.author.mention} 禁止ワードが含まれていたため削除しました。",
-                    delete_after=5, silent=True)
-            except Exception:
-                pass
-            return
+    if wb_data.get("server", True) or message.channel.id in wb_data.get("channels", []):
+        for word in wb_data.get("words", []):
+            w = word.lower()
+            # 日本語はどこに含まれてもNGで、英字は単語境界を考慮
+            if re.search(r'\b' + re.escape(w) + r'\b', content_lower) if w.isascii() else (w in content_lower):
+                try:
+                    await message.delete()
+                    await message.channel.send(
+                        f"{message.author.mention} 禁止ワードが含まれていたため削除しました。",
+                        delete_after=5, silent=True)
+                except Exception:
+                    pass
+                return
 
 
     # ローマ字翻訳 (デフォルトON、!で始まる場合は無視)
@@ -2604,18 +2649,19 @@ async def on_message(message: discord.Message):
         pass  # クールダウン中はスキップ
     else:
         ar_data = db_read("autoreply", guild_id=message.guild.id)
-        for trigger, rd in ar_data.get("replies", {}).items():
-            match_mode = rd.get("match", "partial")
-            matched = (message.content == trigger) if match_mode == "exact" else (trigger in message.content)
-            if matched:
-                if rd.get("emoji"):
-                    try:
-                        await message.add_reaction(rd["emoji"])
-                    except Exception:
-                        pass
-                if rd.get("text"):
-                    await message.reply(rd["text"])
-                break
+        if ar_data.get("server", True) or message.channel.id in ar_data.get("channels", []):
+            for trigger, rd in ar_data.get("replies", {}).items():
+                match_mode = rd.get("match", "partial")
+                matched = (message.content == trigger) if match_mode == "exact" else (trigger in message.content)
+                if matched:
+                    if rd.get("emoji"):
+                        try:
+                            await message.add_reaction(rd["emoji"])
+                        except Exception:
+                            pass
+                    if rd.get("text"):
+                        await message.reply(rd["text"])
+                    break
 
     # 川柳検出 (デフォルトON)
     hk_data = db_read("haiku", guild_id=message.guild.id)
@@ -2674,6 +2720,33 @@ async def cmd_autoreply(interaction: discord.Interaction, action: str, trigger: 
     elif action == "list":
         text = "\n".join(f"`{k}` → {v['text']}" for k, v in autoreplies.items()) or "なし"
         await interaction.followup.send(f"自動返信一覧:\n{text}", ephemeral=True)
+
+@bot.tree.command(name="autoreplyset", description="自動返信機能のON/OFFを切り替えます")
+@app_commands.describe(scope="channel=このチャンネルのみ / server=サーバー全体", state="ON / OFF",
+                       channel="対象チャンネル（省略=実行チャンネル）")
+async def cmd_autoreplyset(interaction: discord.Interaction,
+                       scope: str = "channel", state: str = "ON",
+                       channel: discord.TextChannel = None):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
+        return
+    gd = db_read("autoreply", guild_id=interaction.guild_id)
+    on = state.upper() == "ON"
+    if scope == "server":
+        gd["server"] = on
+        msg = f"サーバー全体の自動返信機能を {'ON' if on else 'OFF'} にしました。"
+    else:
+        target = channel or interaction.channel
+        chs = gd.get("channels", [])
+        if on and target.id not in chs:
+            chs.append(target.id)
+        elif not on and target.id in chs:
+            chs.remove(target.id)
+        gd["channels"] = chs
+        msg = f"{target.mention} の自動返信機能を {'ON' if on else 'OFF'} にしました。"
+    db_write("autoreply", gd, guild_id=interaction.guild_id)
+    await interaction.followup.send(msg, ephemeral=True)
 
 # ──────────────────────────────────────────────
 # 10. リアクション /reaction & Context Menus
