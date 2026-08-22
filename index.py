@@ -313,7 +313,8 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 # あけおめ: 送信APIの実測レイテンシ分だけ前倒しで発火し、少しでも早く0時ちょうどに近いタイミングで届くようにする
 _akeome_latency_samples_ms = []
 AKEOME_LATENCY_SAMPLE_MAX  = 30      # 保持する直近サンプル数
-AKEOME_MAX_EARLY_MS        = 2000    # 前倒しできる上限（計測異常時の暴走防止のセーフティ）
+AKEOME_MAX_EARLY_MS        = 800     # 前倒しできる上限（保守的な安全上限。大きくしすぎるとフライングの原因になる）
+AKEOME_SAFETY_MARGIN_MS    = 80      # 計測したレイテンシからさらに差し引く安全マージン
 AKEOME_PROBE_WINDOW_SEC    = 30      # 発火の何秒前から高頻度サンプリングに切り替えるか
 AKEOME_PROBE_INTERVAL_SEC  = 2       # 高頻度サンプリングの間隔
 
@@ -377,13 +378,19 @@ async def akeome_scheduler():
                 del _akeome_latency_samples_ms[:-AKEOME_LATENCY_SAMPLE_MAX]
             await asyncio.sleep(AKEOME_PROBE_INTERVAL_SEC)
 
-        avg_latency_ms = (sum(_akeome_latency_samples_ms) / len(_akeome_latency_samples_ms)) if _akeome_latency_samples_ms else 0.0
-        lead_ms = min(avg_latency_ms, AKEOME_MAX_EARLY_MS)
+        # 平均ではなく「直近で観測できた最速値」を基準にし、そこから更に安全マージンを引く。
+        # 平均値を使うと実際の送信より前倒しが大きくなりすぎて「フライング」（0時前の送信）が
+        # 起きうるため、常に実測レイテンシ以下になるよう保守的に倒す。
+        if _akeome_latency_samples_ms:
+            base_latency_ms = min(_akeome_latency_samples_ms)
+        else:
+            base_latency_ms = 0.0
+        lead_ms = max(0.0, min(base_latency_ms - AKEOME_SAFETY_MARGIN_MS, AKEOME_MAX_EARLY_MS))
         fire_at = next_midnight - datetime.timedelta(milliseconds=lead_ms)
 
         await _sleep_until_precise(fire_at)
         await _fire_akeome()
-        db_log("akeome_fired", f"lead_ms={lead_ms:.1f} samples={len(_akeome_latency_samples_ms)}")
+        db_log("akeome_fired", f"lead_ms={lead_ms:.1f} base_latency_ms={base_latency_ms:.1f} samples={len(_akeome_latency_samples_ms)}")
 
         await asyncio.sleep(5)  # 同一瞬間の二重発火防止
 
@@ -878,7 +885,7 @@ HELP_TEXT = {
         "**毎日0時にあけおめメッセージを自動送信するチャンネルを設定します。**\n"
         "使い方: `/akeomeset channel:[チャンネル]`\n"
         "**仕様:**\n"
-        "- 発火直前（0時の30秒前から）にBotの実際の送信APIレイテンシを継続的に計測し、その分だけ前倒しで送信することで、実際にDiscordへ届く時刻が0時ちょうどに近づくようにしています（前倒しは最大2秒までの安全上限つき）\n"
+        "- 発火直前（0時の30秒前から）にBotの実際の送信APIレイテンシを継続的に計測し、直近で観測できた最速のレイテンシから安全マージンを引いた分だけ前倒しで送信することで、0時より前に届いてしまう「フライング」を避けつつ、実際に届く時刻を0時ちょうどに近づけます（前倒しは最大0.8秒までの安全上限つき）\n"
         "必要権限: チャンネル管理権限"
     ),
     "impersonate": (
