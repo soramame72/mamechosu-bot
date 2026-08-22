@@ -310,22 +310,82 @@ async def task_save_vc_rankings():
 # ──────────────────────────────────────────────
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
-@tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=JST))
-async def akeome_loop():
+# あけおめ: 送信APIの実測レイテンシ分だけ前倒しで発火し、少しでも早く0時ちょうどに近いタイミングで届くようにする
+_akeome_latency_samples_ms = []
+AKEOME_LATENCY_SAMPLE_MAX  = 30      # 保持する直近サンプル数
+AKEOME_MAX_EARLY_MS        = 2000    # 前倒しできる上限（計測異常時の暴走防止のセーフティ）
+AKEOME_PROBE_WINDOW_SEC    = 30      # 発火の何秒前から高頻度サンプリングに切り替えるか
+AKEOME_PROBE_INTERVAL_SEC  = 2       # 高頻度サンプリングの間隔
+
+async def _measure_akeome_latency_ms() -> float | None:
+    # 実際にメッセージ送信で使うREST APIへの往復時間を計測する（WebSocketのheartbeat遅延とは別物）
+    try:
+        t0 = time.perf_counter()
+        await bot.http.request(discord.http.Route("GET", "/users/@me"))
+        return (time.perf_counter() - t0) * 1000
+    except Exception:
+        return None
+
+async def _sleep_until_precise(target: datetime.datetime):
+    # 長い待ちは半分ずつ詰めていき、最後は小刻みに待つことでズレを抑える
+    while True:
+        remaining = (target - datetime.datetime.now(JST)).total_seconds()
+        if remaining <= 0:
+            return
+        await asyncio.sleep(remaining / 2 if remaining > 0.02 else remaining)
+
+async def _send_akeome_safe(ch):
+    try:
+        await ch.send("あけおめ")
+    except Exception as e:
+        db_log("akeome_send_failed", f"channel={ch.id} | {e}", level="WARN")
+
+async def _fire_akeome():
+    sends = []
     for guild in bot.guilds:
         data = db_read("akeome", guild_id=guild.id)
         if not data: continue
         target_channels = set()
         if data.get("server"):
-            for ch in guild.text_channels:
-                target_channels.add(ch)
+            target_channels.update(guild.text_channels)
         else:
             for cid in data.get("channels", []):
                 ch = guild.get_channel(cid)
                 if ch: target_channels.add(ch)
         for ch in target_channels:
-            try: await ch.send("あけおめ")
-            except: pass
+            sends.append(_send_akeome_safe(ch))
+    if sends:
+        # 全チャンネルへ同時に撃つことで、チャンネル数が多くても逐次送信による遅れを防ぐ
+        await asyncio.gather(*sends, return_exceptions=True)
+
+async def akeome_scheduler():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.datetime.now(JST)
+        next_midnight = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if next_midnight <= now:
+            next_midnight += datetime.timedelta(days=1)
+
+        probe_start = next_midnight - datetime.timedelta(seconds=AKEOME_PROBE_WINDOW_SEC)
+        await _sleep_until_precise(probe_start)
+
+        # 発火直前は回線状況の変化に追従するため高頻度でレイテンシを再計測する
+        while datetime.datetime.now(JST) < next_midnight - datetime.timedelta(seconds=1):
+            ms = await _measure_akeome_latency_ms()
+            if ms is not None:
+                _akeome_latency_samples_ms.append(ms)
+                del _akeome_latency_samples_ms[:-AKEOME_LATENCY_SAMPLE_MAX]
+            await asyncio.sleep(AKEOME_PROBE_INTERVAL_SEC)
+
+        avg_latency_ms = (sum(_akeome_latency_samples_ms) / len(_akeome_latency_samples_ms)) if _akeome_latency_samples_ms else 0.0
+        lead_ms = min(avg_latency_ms, AKEOME_MAX_EARLY_MS)
+        fire_at = next_midnight - datetime.timedelta(milliseconds=lead_ms)
+
+        await _sleep_until_precise(fire_at)
+        await _fire_akeome()
+        db_log("akeome_fired", f"lead_ms={lead_ms:.1f} samples={len(_akeome_latency_samples_ms)}")
+
+        await asyncio.sleep(5)  # 同一瞬間の二重発火防止
 
 @bot.tree.command(name="akeomeset", description="毎日0時(JST)にあけおめメッセージを送信するチャンネルを設定します")
 @app_commands.describe(channel="送信するチャンネル")
@@ -334,11 +394,14 @@ async def cmd_akeomeset(interaction: discord.Interaction, channel: discord.TextC
     if not interaction.user.guild_permissions.manage_channels:
         await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
         return
-    data = db_read("akeome", guild_id="global")
-    if not isinstance(data, dict):
-        data = {}
-    data[str(interaction.guild_id)] = channel.id
-    db_write("akeome", data, guild_id="global")
+    gd = db_read("akeome", guild_id=interaction.guild_id)
+    if not isinstance(gd, dict):
+        gd = {}
+    chs = gd.get("channels", [])
+    if channel.id not in chs:
+        chs.append(channel.id)
+    gd["channels"] = chs
+    db_write("akeome", gd, guild_id=interaction.guild_id)
     await interaction.followup.send(f"毎日あけおめメッセージを {channel.mention} に送信するように設定しました。", ephemeral=True)
 
 @bot.event
@@ -352,8 +415,30 @@ async def on_ready():
         return
     bot._did_initial_setup = True
 
-    if not akeome_loop.is_running():
-        akeome_loop.start()
+    # 旧バージョンの /akeomeset が書き込んでいた誤ったグローバルストアからの一回限りの移行
+    _legacy_akeome = db_read("akeome", guild_id="global")
+    if isinstance(_legacy_akeome, dict) and _legacy_akeome:
+        migrated = 0
+        for _gid_str, _ch_id in _legacy_akeome.items():
+            try:
+                _gid = int(_gid_str)
+            except (TypeError, ValueError):
+                continue
+            _gd = db_read("akeome", guild_id=_gid)
+            if not isinstance(_gd, dict):
+                _gd = {}
+            _chs = _gd.get("channels", [])
+            if _ch_id not in _chs:
+                _chs.append(_ch_id)
+                _gd["channels"] = _chs
+                db_write("akeome", _gd, guild_id=_gid)
+                migrated += 1
+        db_write("akeome", {}, guild_id="global")
+        db_log("akeome_migration", f"migrated {migrated} guild(s) from legacy global store")
+
+    if not getattr(bot, "_akeome_scheduler_started", False):
+        bot._akeome_scheduler_started = True
+        asyncio.create_task(akeome_scheduler())
     print(f"ログイン: {bot.user} (ID: {bot.user.id})")
     try:
         h_cmd = bot.tree.get_command("h")
@@ -792,6 +877,8 @@ HELP_TEXT = {
     "akeomeset": (
         "**毎日0時にあけおめメッセージを自動送信するチャンネルを設定します。**\n"
         "使い方: `/akeomeset channel:[チャンネル]`\n"
+        "**仕様:**\n"
+        "- 発火直前（0時の30秒前から）にBotの実際の送信APIレイテンシを継続的に計測し、その分だけ前倒しで送信することで、実際にDiscordへ届く時刻が0時ちょうどに近づくようにしています（前倒しは最大2秒までの安全上限つき）\n"
         "必要権限: チャンネル管理権限"
     ),
     "impersonate": (
