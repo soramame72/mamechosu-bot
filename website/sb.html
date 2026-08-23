@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Script Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/blockly/blockly.min.js"></script>
+<style>
+  :root{
+    --bg-app:     #F6F7FB;
+    --bg-panel:   #FFFFFF;
+    --line:       #E6E8EF;
+    --text-hi:    #14151A;
+    --text-mid:   #5B5F6B;
+    --text-dim:   #9AA0AC;
+    --indigo:     #4F46E5;
+    --indigo-hi:  #6366F1;
+    --indigo-soft:#EEF0FF;
+    --coral:      #FF6B4A;   /* ダウンロード = このツールのゴール */
+    --coral-hi:   #FF8264;
+    --danger:     #EF4444;
+    --radius:     12px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:var(--bg-app);
+    color:var(--text-hi);
+    font-family:'Inter',system-ui,sans-serif;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+
+  /* ── ヘッダー ── */
+  header{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:16px 24px;
+    background:var(--bg-panel);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .mark{
+    width:36px; height:36px; border-radius:10px;
+    background:linear-gradient(135deg, var(--indigo), var(--indigo-hi));
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;
+    color:#fff;
+    flex-shrink:0;
+    box-shadow:0 8px 18px -8px rgba(79,70,229,.55);
+  }
+  .title-block h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:17px; font-weight:600; letter-spacing:.01em;
+    margin:0; line-height:1.2; color:var(--text-hi);
+  }
+  .title-block p{
+    margin:2px 0 0; font-size:12.5px; color:var(--text-dim);
+  }
+  .flow{
+    margin-left:auto;
+    display:flex; align-items:center; gap:7px;
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-mid);
+  }
+  .flow span.node{
+    padding:4px 10px; border-radius:999px; background:var(--indigo-soft);
+    border:1px solid #DFE1FF; color:var(--indigo);
+  }
+  .flow .wire{ width:18px; height:1px; background:var(--line); position:relative; overflow:visible; }
+  .flow .wire::after{
+    content:''; position:absolute; top:-2px; left:0; width:5px; height:5px; border-radius:50%;
+    background:var(--indigo-hi);
+    animation:travel 2.6s linear infinite;
+  }
+  @keyframes travel{ 0%{left:0;} 100%{left:14px;} }
+  @media (prefers-reduced-motion: reduce){ .flow .wire::after{ animation:none; left:7px; } }
+
+  /* ── ツールバー ── */
+  .toolbar{
+    display:flex; align-items:center; gap:10px;
+    padding:12px 24px; background:var(--bg-panel);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0; flex-wrap:wrap;
+  }
+  .toolbar label{ font-size:12px; color:var(--text-dim); margin-right:-4px; }
+  .toolbar input[type=text]{
+    background:var(--bg-app); border:1px solid var(--line); color:var(--text-hi);
+    border-radius:8px; padding:8px 11px; font-size:13px; font-family:'IBM Plex Mono',monospace;
+    min-width:200px;
+  }
+  .toolbar input[type=text]:focus{ outline:2px solid var(--indigo-hi); outline-offset:1px; border-color:var(--indigo); }
+  .toolbar input[type=file]{ display:none; }
+
+  button{
+    font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
+    border:1px solid var(--line); background:var(--bg-panel); color:var(--text-hi);
+    padding:9px 15px; border-radius:8px; cursor:pointer;
+    transition:transform .08s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  button:hover{ background:#FAFAFD; border-color:#D5D8E3; }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible{ outline:2px solid var(--indigo-hi); outline-offset:2px; }
+
+  .btn-primary{
+    background:linear-gradient(135deg, var(--coral), var(--coral-hi));
+    border-color:transparent; color:#fff;
+    box-shadow:0 8px 20px -10px rgba(255,107,74,.65);
+  }
+  .btn-primary:hover{ filter:brightness(1.04); }
+
+  .spacer{ flex:1; }
+
+  /* ── ワークスペース ── */
+  #workspace-wrap{ position:relative; flex:1; min-height:0; padding:14px 14px 0; }
+  #blockly-div{
+    position:absolute; inset:14px 14px 0 14px;
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+    box-shadow:0 1px 2px rgba(20,21,26,.04);
+  }
+
+  .toast{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--text-hi); color:#fff;
+    padding:11px 18px; border-radius:10px; font-size:13px;
+    opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+    box-shadow:0 16px 34px -14px rgba(20,21,26,.5);
+    display:flex; align-items:center; gap:8px;
+    z-index:50;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast .dot{ width:7px; height:7px; border-radius:50%; background:#8FE3B0; flex-shrink:0; }
+  .toast.err .dot{ background:#FF9C9C; }
+
+  ::-webkit-scrollbar{ width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb{ background:#D8DAE3; border-radius:6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="mark">⌁</div>
+  <div class="title-block">
+    <h1>Script Builder</h1>
+  </div>
+  <div class="flow" aria-hidden="true">
+    <span class="node">受信</span><span class="wire"></span>
+    <span class="node">条件</span><span class="wire"></span>
+    <span class="node">実行</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <label for="scriptName">スクリプト名</label>
+  <input type="text" id="scriptName" value="サンプルスクリプト" maxlength="50">
+
+  <span class="spacer"></span>
+
+  <button id="btnLoad">📂 読み込み</button>
+  <input type="file" id="fileInput" accept="application/json">
+  <button id="btnClear">🗑 クリア</button>
+  <button id="btnDownload" class="btn-primary">⬇ スクリプトをダウンロード (.json)</button>
+</div>
+
+<div id="workspace-wrap">
+  <div id="blockly-div"></div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg"></span></div>
+
+<!-- ══════════════════════════════════════════════
+     ブロック定義
+     Bot側スキーマ: { version, name, trigger:{type,channel_id,condition}, actions:[...] }
+     ══════════════════════════════════════════════ -->
+<script>
+const CONDITION_OPTIONS = [
+  ["条件なし（常に反応）","any"],
+  ["完全一致 =","equals"],
+  ["含む",       "contains"],
+  ["で始まる",    "startswith"],
+  ["で終わる",    "endswith"],
+];
+
+const COLOUR_TRIGGER = '#10B981';
+const COLOUR_ACTION   = '#4F46E5';
+const COLOUR_MOD      = '#EF4444';
+const COLOUR_FUN      = '#EC4899';
+
+Blockly.Blocks['event_on_message'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField('⚡ メッセージを受信したとき');
+    this.appendValueInput('CHANNEL_ID')
+        .setCheck(null)
+        .appendField('  対象チャンネルID(任意)');
+    this.appendDummyInput()
+        .appendField('  条件')
+        .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
+        .appendField(new Blockly.FieldTextInput(''), 'COND_VALUE');
+    this.appendStatementInput('ACTIONS')
+        .setCheck('action')
+        .appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メッセージを受信した時に発動するトリガーです。チャンネルIDと条件を空にすると全チャンネル・無条件で反応します。');
+    this.setDeletable(true);
+  }
+};
+
+Blockly.Blocks['value_channel_id'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(new Blockly.FieldTextInput(''), 'ID');
+    this.setOutput(true, null);
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('チャンネルIDを数字で入力（空欄=全チャンネル対象）。');
+  }
+};
+
+function defineActionBlock(type, colour, tooltip, initFn) {
+  Blockly.Blocks[type] = {
+    init: function() {
+      initFn.call(this);
+      this.setPreviousStatement(true, 'action');
+      this.setNextStatement(true, 'action');
+      this.setColour(colour);
+      this.setTooltip(tooltip);
+    }
+  };
+}
+
+/* ── 待機 ── */
+defineActionBlock('action_delay', COLOUR_ACTION, '指定ミリ秒だけ待機してから次のアクションに進みます。', function() {
+  this.appendDummyInput()
+      .appendField('⏱ 待機')
+      .appendField(new Blockly.FieldNumber(1000, 0, 3600000, 1), 'MS')
+      .appendField('ミリ秒（最大3600000=1時間）');
+});
+defineActionBlock('action_random_delay', COLOUR_ACTION, 'min〜maxミリ秒の範囲でランダムに待機します。', function() {
+  this.appendDummyInput()
+      .appendField('🎲 ランダム待機')
+      .appendField(new Blockly.FieldNumber(500, 0, 3600000, 1), 'MIN_MS')
+      .appendField('〜')
+      .appendField(new Blockly.FieldNumber(2000, 0, 3600000, 1), 'MAX_MS')
+      .appendField('ミリ秒');
+});
+
+/* ── メッセージ ── */
+defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーが発生したチャンネルにメッセージを送信します（最大2000文字）。', function() {
+  this.appendDummyInput()
+      .appendField('💬 メッセージ送信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信（Discordのリプライ機能）します。', function() {
+  this.appendDummyInput()
+      .appendField('↩ 返信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・色を指定してEmbedを送信します（タイトルか説明のどちらかは必須）。', function() {
+  this.appendDummyInput().appendField('🖼 Embed送信');
+  this.appendDummyInput()
+      .appendField('  タイトル')
+      .appendField(new Blockly.FieldTextInput(''), 'TITLE');
+  this.appendDummyInput()
+      .appendField('  説明')
+      .appendField(new Blockly.FieldTextInput(''), 'DESCRIPTION');
+  this.appendDummyInput()
+      .appendField('  色(16進・#無し)')
+      .appendField(new Blockly.FieldTextInput('4F46E5'), 'COLOR');
+});
+defineActionBlock('action_send_dm', COLOUR_ACTION, '送信者にDMを送ります（DMを許可していない場合は何も起きません）。', function() {
+  this.appendDummyInput()
+      .appendField('✉ DM送信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_send_to_channel', COLOUR_ACTION, '指定したチャンネルIDにメッセージを送信します。送信先チャンネルであなた自身とBotの両方に送信権限が必要です。', function() {
+  this.appendDummyInput()
+      .appendField('📮 他chへ送信  channel_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+  this.appendDummyInput()
+      .appendField('  内容')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+
+/* ── メッセージ操作 ── */
+defineActionBlock('action_add_reaction', COLOUR_ACTION, '受信したメッセージに絵文字リアクションを付けます。', function() {
+  this.appendDummyInput()
+      .appendField('😀 リアクション付与')
+      .appendField(new Blockly.FieldTextInput('👍'), 'EMOJI');
+});
+defineActionBlock('action_remove_all_reactions', COLOUR_ACTION, 'メッセージのリアクションをすべて削除します。', function() {
+  this.appendDummyInput().appendField('🧹 リアクション全削除');
+});
+defineActionBlock('action_delete_message', COLOUR_ACTION, 'トリガーとなったメッセージを削除します。', function() {
+  this.appendDummyInput().appendField('🗑 このメッセージを削除');
+});
+defineActionBlock('action_pin_message', COLOUR_ACTION, 'メッセージをピン留めします。', function() {
+  this.appendDummyInput().appendField('📌 メッセージを固定');
+});
+defineActionBlock('action_unpin_message', COLOUR_ACTION, 'メッセージのピン留めを解除します。', function() {
+  this.appendDummyInput().appendField('📌 固定を解除');
+});
+
+/* ── メンバー操作 ── */
+defineActionBlock('action_add_role', COLOUR_ACTION, '送信者にロールを付与します。', function() {
+  this.appendDummyInput()
+      .appendField('➕ ロール付与  role_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
+});
+defineActionBlock('action_remove_role', COLOUR_ACTION, '送信者からロールを外します。', function() {
+  this.appendDummyInput()
+      .appendField('➖ ロール剥奪  role_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
+});
+defineActionBlock('action_set_nickname', COLOUR_ACTION, '送信者のニックネームを変更します（空欄でリセット）。', function() {
+  this.appendDummyInput()
+      .appendField('✏ ニックネーム変更')
+      .appendField(new Blockly.FieldTextInput(''), 'NICKNAME');
+});
+
+/* ── チャンネル操作 ── */
+defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します。', function() {
+  this.appendDummyInput()
+      .appendField('🧵 スレッド作成  名前:')
+      .appendField(new Blockly.FieldTextInput('スレッド'), 'NAME');
+});
+defineActionBlock('action_set_channel_topic', COLOUR_ACTION, 'このチャンネルのトピックを変更します。', function() {
+  this.appendDummyInput()
+      .appendField('📝 チャンネルトピック変更')
+      .appendField(new Blockly.FieldTextInput(''), 'TOPIC');
+});
+
+/* ── モデレーション（要権限） ── */
+defineActionBlock('action_timeout', COLOUR_MOD, '送信者をタイムアウトします（最大28日）。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput()
+      .appendField('🔇 タイムアウト')
+      .appendField(new Blockly.FieldNumber(60, 1, 2419200, 1), 'SECONDS')
+      .appendField('秒');
+});
+defineActionBlock('action_remove_timeout', COLOUR_MOD, '送信者のタイムアウトを解除します。', function() {
+  this.appendDummyInput().appendField('🔊 タイムアウト解除');
+});
+defineActionBlock('action_kick', COLOUR_MOD, '送信者をサーバーからキックします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🚪 送信者をキック');
+});
+defineActionBlock('action_ban', COLOUR_MOD, '送信者をサーバーからBANします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🔨 送信者をBAN');
+});
+
+/* ── お楽しみ ── */
+defineActionBlock('action_rickroll', COLOUR_FUN, 'ランダムなリックロールGIFを送信します。', function() {
+  this.appendDummyInput().appendField('🕺 リックロールを表示');
+});
+defineActionBlock('action_random_image', COLOUR_FUN, '/h コマンドと同じソースからランダム画像を送信します（NSFWチャンネル限定・条件に合わなければ何も起きません）。', function() {
+  this.appendDummyInput().appendField('🔞 /h の画像を表示（NSFWチャンネル限定）');
+});
+
+const toolbox = {
+  kind: 'categoryToolbox',
+  contents: [
+    { kind: 'category', name: 'トリガー', colour: COLOUR_TRIGGER,
+      contents: [
+        { kind: 'block', type: 'event_on_message' },
+        { kind: 'block', type: 'value_channel_id' },
+      ]},
+    { kind: 'category', name: '待機', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_delay' },
+        { kind: 'block', type: 'action_random_delay' },
+      ]},
+    { kind: 'category', name: 'メッセージ', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_send_message' },
+        { kind: 'block', type: 'action_reply' },
+        { kind: 'block', type: 'action_send_embed' },
+        { kind: 'block', type: 'action_send_dm' },
+        { kind: 'block', type: 'action_send_to_channel' },
+      ]},
+    { kind: 'category', name: 'メッセージ操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_add_reaction' },
+        { kind: 'block', type: 'action_remove_all_reactions' },
+        { kind: 'block', type: 'action_delete_message' },
+        { kind: 'block', type: 'action_pin_message' },
+        { kind: 'block', type: 'action_unpin_message' },
+      ]},
+    { kind: 'category', name: 'メンバー操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_add_role' },
+        { kind: 'block', type: 'action_remove_role' },
+        { kind: 'block', type: 'action_set_nickname' },
+      ]},
+    { kind: 'category', name: 'チャンネル操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_create_thread' },
+        { kind: 'block', type: 'action_set_channel_topic' },
+      ]},
+    { kind: 'category', name: 'モデレーション（要権限）', colour: COLOUR_MOD,
+      contents: [
+        { kind: 'block', type: 'action_timeout' },
+        { kind: 'block', type: 'action_remove_timeout' },
+        { kind: 'block', type: 'action_kick' },
+        { kind: 'block', type: 'action_ban' },
+      ]},
+    { kind: 'category', name: 'お楽しみ', colour: COLOUR_FUN,
+      contents: [
+        { kind: 'block', type: 'action_rickroll' },
+        { kind: 'block', type: 'action_random_image' },
+      ]},
+  ]
+};
+
+const workspace = Blockly.inject('blockly-div', {
+  toolbox: toolbox,
+  theme: Blockly.Theme.defineTheme('scriptBuilderLight', {
+    base: Blockly.Themes.Classic,
+    componentStyles: {
+      workspaceBackgroundColour: '#FFFFFF',
+      toolboxBackgroundColour: '#FAFAFD',
+      toolboxForegroundColour: '#14151A',
+      flyoutBackgroundColour: '#FAFAFD',
+      flyoutForegroundColour: '#14151A',
+      flyoutOpacity: 1,
+      scrollbarColour: '#D8DAE3',
+      insertionMarkerColour: '#4F46E5',
+      insertionMarkerOpacity: 0.4,
+    }
+  }),
+  grid: { spacing: 24, length: 2, colour: '#EEEFF4', snap: true },
+  zoom: { controls: true, wheel: true, startScale: 0.9 },
+  trashcan: true,
+});
+
+// 初期状態：トリガーブロックを1つ置いておく
+(function seed(){
+  const b = workspace.newBlock('event_on_message');
+  b.initSvg(); b.render();
+  b.moveBy(40, 40);
+})();
+
+// ══════════════════════════════════════════════
+// トースト通知
+// ══════════════════════════════════════════════
+let toastTimer = null;
+function showToast(msg, isErr) {
+  const el = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+// ══════════════════════════════════════════════
+// Blockly → JSON シリアライズ
+// ══════════════════════════════════════════════
+function actionBlockToJson(block) {
+  switch (block.type) {
+    case 'action_delay':
+      return { type: 'delay', ms: Number(block.getFieldValue('MS')) };
+    case 'action_random_delay':
+      return { type: 'random_delay', min_ms: Number(block.getFieldValue('MIN_MS')), max_ms: Number(block.getFieldValue('MAX_MS')) };
+    case 'action_send_message':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
+    case 'action_reply':
+      return { type: 'reply', content: block.getFieldValue('CONTENT') };
+    case 'action_send_embed': {
+      const out = { type: 'send_embed' };
+      const title = block.getFieldValue('TITLE'); if (title) out.title = title;
+      const desc  = block.getFieldValue('DESCRIPTION'); if (desc) out.description = desc;
+      const color = block.getFieldValue('COLOR'); if (color) out.color = color;
+      return out;
+    }
+    case 'action_send_dm':
+      return { type: 'send_dm', content: block.getFieldValue('CONTENT') };
+    case 'action_send_to_channel':
+      return { type: 'send_to_channel', channel_id: block.getFieldValue('CHANNEL_ID'), content: block.getFieldValue('CONTENT') };
+    case 'action_add_reaction':
+      return { type: 'add_reaction', emoji: block.getFieldValue('EMOJI') };
+    case 'action_remove_all_reactions':
+      return { type: 'remove_all_reactions' };
+    case 'action_delete_message':
+      return { type: 'delete_message' };
+    case 'action_pin_message':
+      return { type: 'pin_message' };
+    case 'action_unpin_message':
+      return { type: 'unpin_message' };
+    case 'action_add_role':
+      return { type: 'add_role', role_id: block.getFieldValue('ROLE_ID') };
+    case 'action_remove_role':
+      return { type: 'remove_role', role_id: block.getFieldValue('ROLE_ID') };
+    case 'action_set_nickname':
+      return { type: 'set_nickname', nickname: block.getFieldValue('NICKNAME') };
+    case 'action_create_thread':
+      return { type: 'create_thread', name: block.getFieldValue('NAME') };
+    case 'action_set_channel_topic':
+      return { type: 'set_channel_topic', topic: block.getFieldValue('TOPIC') };
+    case 'action_timeout':
+      return { type: 'timeout', seconds: Number(block.getFieldValue('SECONDS')) };
+    case 'action_remove_timeout':
+      return { type: 'remove_timeout' };
+    case 'action_kick':
+      return { type: 'kick' };
+    case 'action_ban':
+      return { type: 'ban' };
+    case 'action_rickroll':
+      return { type: 'rickroll' };
+    case 'action_random_image':
+      return { type: 'random_image' };
+    default:
+      return null;
+  }
+}
+
+function buildScriptJson() {
+  const triggerBlocks = workspace.getTopBlocks(true).filter(b => b.type === 'event_on_message');
+  if (triggerBlocks.length === 0) {
+    throw new Error('「⚡ メッセージを受信したとき」ブロックが見つかりません。トリガーブロックを配置してください。');
+  }
+  if (triggerBlocks.length > 1) {
+    throw new Error('トリガーブロックは1つだけ配置してください（現在 ' + triggerBlocks.length + ' 個あります）。');
+  }
+  const trigger = triggerBlocks[0];
+
+  const condType = trigger.getFieldValue('COND_TYPE');
+  const condValue = trigger.getFieldValue('COND_VALUE');
+  const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
+
+  let channelId = null;
+  const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
+  if (chBlock && chBlock.type === 'value_channel_id') {
+    const raw = (chBlock.getFieldValue('ID') || '').trim();
+    if (raw) channelId = raw;
+  }
+
+  const actions = [];
+  let cur = trigger.getInputTargetBlock('ACTIONS');
+  while (cur) {
+    const a = actionBlockToJson(cur);
+    if (a) actions.push(a);
+    cur = cur.getNextBlock();
+  }
+  if (actions.length === 0) {
+    throw new Error('アクションが1つもありません。「実行するアクション」の中にブロックを繋げてください。');
+  }
+  if (actions.length > 20) {
+    throw new Error('アクション数は最大20個までです（現在 ' + actions.length + ' 個）。');
+  }
+
+  const name = (document.getElementById('scriptName').value || 'スクリプト').trim().slice(0, 50);
+
+  return {
+    version: '1.0',
+    name: name,
+    trigger: {
+      type: 'on_message',
+      channel_id: channelId,
+      condition: condition,
+    },
+    actions: actions,
+  };
+}
+
+document.getElementById('btnDownload').addEventListener('click', () => {
+  let json;
+  try {
+    json = buildScriptJson();
+  } catch (e) {
+    showToast(e.message, true);
+    return;
+  }
+  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeName = json.name.replace(/[\\/:*?"<>|]/g, '_') || 'script';
+  a.href = url;
+  a.download = safeName + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('ダウンロードしました：' + safeName + '.json');
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (!confirm('ワークスペースをすべてクリアしますか？')) return;
+  workspace.clear();
+  const b = workspace.newBlock('event_on_message');
+  b.initSvg(); b.render();
+  b.moveBy(40, 40);
+  showToast('クリアしました');
+});
+
+// ══════════════════════════════════════════════
+// JSON → Blockly 復元（既存スクリプトの再編集用）
+// ══════════════════════════════════════════════
+const ACTION_JSON_TO_BLOCK = {
+  delay:        (a) => ({ type: 'action_delay', fields: { MS: a.ms ?? 1000 } }),
+  random_delay: (a) => ({ type: 'action_random_delay', fields: { MIN_MS: a.min_ms ?? 500, MAX_MS: a.max_ms ?? 2000 } }),
+  send_message: (a) => ({ type: 'action_send_message', fields: { CONTENT: a.content ?? '' } }),
+  reply:        (a) => ({ type: 'action_reply', fields: { CONTENT: a.content ?? '' } }),
+  send_embed:   (a) => ({ type: 'action_send_embed', fields: { TITLE: a.title ?? '', DESCRIPTION: a.description ?? '', COLOR: a.color ?? '4F46E5' } }),
+  send_dm:      (a) => ({ type: 'action_send_dm', fields: { CONTENT: a.content ?? '' } }),
+  send_to_channel: (a) => ({ type: 'action_send_to_channel', fields: { CHANNEL_ID: String(a.channel_id ?? ''), CONTENT: a.content ?? '' } }),
+  add_reaction: (a) => ({ type: 'action_add_reaction', fields: { EMOJI: a.emoji ?? '👍' } }),
+  remove_all_reactions: () => ({ type: 'action_remove_all_reactions', fields: {} }),
+  delete_message: () => ({ type: 'action_delete_message', fields: {} }),
+  pin_message:   () => ({ type: 'action_pin_message', fields: {} }),
+  unpin_message: () => ({ type: 'action_unpin_message', fields: {} }),
+  add_role:      (a) => ({ type: 'action_add_role', fields: { ROLE_ID: String(a.role_id ?? '') } }),
+  remove_role:   (a) => ({ type: 'action_remove_role', fields: { ROLE_ID: String(a.role_id ?? '') } }),
+  set_nickname:  (a) => ({ type: 'action_set_nickname', fields: { NICKNAME: a.nickname ?? '' } }),
+  create_thread: (a) => ({ type: 'action_create_thread', fields: { NAME: a.name ?? '' } }),
+  set_channel_topic: (a) => ({ type: 'action_set_channel_topic', fields: { TOPIC: a.topic ?? '' } }),
+  timeout:       (a) => ({ type: 'action_timeout', fields: { SECONDS: a.seconds ?? 60 } }),
+  remove_timeout:() => ({ type: 'action_remove_timeout', fields: {} }),
+  kick:          () => ({ type: 'action_kick', fields: {} }),
+  ban:           () => ({ type: 'action_ban', fields: {} }),
+  rickroll:      () => ({ type: 'action_rickroll', fields: {} }),
+  random_image:  () => ({ type: 'action_random_image', fields: {} }),
+};
+
+function actionJsonToBlock(action) {
+  const mapper = ACTION_JSON_TO_BLOCK[action.type];
+  if (!mapper) return null;
+  const spec = mapper(action);
+  const block = workspace.newBlock(spec.type);
+  for (const [field, value] of Object.entries(spec.fields)) {
+    block.setFieldValue(String(value), field);
+  }
+  block.initSvg();
+  block.render();
+  return block;
+}
+
+function loadScriptJson(json) {
+  if (!json || typeof json !== 'object' || !json.trigger || !Array.isArray(json.actions)) {
+    throw new Error('このJSONは対応フォーマットではありません（trigger / actions が必要です）。');
+  }
+  workspace.clear();
+
+  document.getElementById('scriptName').value = json.name || 'スクリプト';
+
+  const trigger = workspace.newBlock('event_on_message');
+  trigger.initSvg(); trigger.render();
+  trigger.moveBy(40, 40);
+
+  const cond = json.trigger.condition || { type: 'any' };
+  trigger.setFieldValue(cond.type || 'any', 'COND_TYPE');
+  if (cond.value) trigger.setFieldValue(String(cond.value), 'COND_VALUE');
+
+  if (json.trigger.channel_id) {
+    const chBlock = workspace.newBlock('value_channel_id');
+    chBlock.initSvg(); chBlock.render();
+    chBlock.setFieldValue(String(json.trigger.channel_id), 'ID');
+    const conn = trigger.getInput('CHANNEL_ID').connection;
+    conn.connect(chBlock.outputConnection);
+  }
+
+  let prevConn = trigger.getInput('ACTIONS').connection;
+  for (const action of json.actions) {
+    const b = actionJsonToBlock(action);
+    if (!b) continue;
+    prevConn.connect(b.previousConnection);
+    prevConn = b.nextConnection;
+  }
+
+  Blockly.svgResize(workspace);
+}
+
+document.getElementById('btnLoad').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const json = JSON.parse(reader.result);
+      loadScriptJson(json);
+      showToast('読み込みました：' + file.name);
+    } catch (e) {
+      showToast('読み込みに失敗しました: ' + e.message, true);
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
+});
+
+window.addEventListener('resize', () => Blockly.svgResize(workspace));
+</script>
+</body>
+</html>
