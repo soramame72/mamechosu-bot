@@ -214,6 +214,39 @@ async def safe_defer(interaction: discord.Interaction, ephemeral=False):
         pass
 
 
+async def _confirm_delete(msg, max_attempts: int = 4) -> bool:
+    # delete_after引数任せの削除は失敗しても気づけないため、削除できたことを確認できるまでリトライする
+    for attempt in range(max_attempts):
+        try:
+            await msg.delete()
+            return True
+        except discord.NotFound:
+            return True  # 既に削除済みなら成功扱い
+        except discord.Forbidden:
+            db_log("temp_message_delete_forbidden", f"channel={msg.channel.id} msg={msg.id}", level="WARN")
+            return False
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                db_log("temp_message_delete_failed", f"channel={msg.channel.id} msg={msg.id} | {e}", level="WARN")
+                return False
+            await asyncio.sleep(1.5 * (attempt + 1))
+    return False
+
+async def _delayed_confirmed_delete(msg, delay: float):
+    await asyncio.sleep(delay)
+    await _confirm_delete(msg)
+
+async def send_temp(channel, content=None, *, delete_after: float = 5, silent: bool = True, **kwargs):
+    """一時メッセージを送信し、delete_after秒後に「削除できたことを確認できるまで」リトライしながら削除する。"""
+    try:
+        msg = await channel.send(content, silent=silent, **kwargs)
+    except Exception as e:
+        db_log("temp_message_send_failed", str(e), level="WARN")
+        return None
+    asyncio.create_task(_delayed_confirmed_delete(msg, delete_after))
+    return msg
+
+
 # ──────────────────────────────────────────────
 # GROQ ステータス更新 (1分ごと、100/1でえっち喘ぎ声)
 # ──────────────────────────────────────────────
@@ -580,6 +613,7 @@ HELP_TEXT = {
         "- 自動返信設定\n"
         "- グローバルチャット参加/退出\n"
         "- ロールパネル作成・編集\n"
+        "- スクリプトビルダーへのリンク表示\n"
         "必要権限: チャンネル管理権限"
     ),
     "rolepanel": (
@@ -645,13 +679,18 @@ HELP_TEXT = {
     "uploadscript": (
         "**カスタムスクリプト(.json)をアップロードして登録します。**\n"
         "使い方: `/uploadscript file:[.jsonファイル]`\n"
+        "**スクリプトの作り方:**\n"
+        "- <http://mamechosu.cloudfree.jp/dc/mb/sb.html> のWeb GUI（Blockly）でブロックを組み立てて「スクリプトをダウンロード」するだけで .json ファイルが作成できます\n"
         "**仕様:**\n"
-        "- Web GUI（Blockly等）で作成したビジュアルスクリプトのJSONを読み込み、`trigger`（発動条件）と`actions`（実行内容）に従って自動実行するようにします\n"
+        "- 読み込んだJSONは `trigger`（発動条件）と`actions`（実行内容）に従って自動実行されます\n"
+        "- 使えるトリガー: メッセージ受信、メンバー参加/退出、リアクション追加、VC参加/退出\n"
         "- アクション数は最大20個、`delay`は最大1時間まで\n"
-        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、タイムアウト/解除、キック、BAN、待機/ランダム待機、リックロール表示、ランダム画像表示（`/h`と同じ、NSFWチャンネル限定）\n"
-        "- BAN・キック・タイムアウト・ロール操作・ニックネーム変更・メッセージ削除/固定・スレッド作成・チャンネル編集などの管理アクションは、**実行のたびに**アップロードした本人とBot自身が実際にその権限を持っているかを再チェックしてから実行します\n"
+        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与(単体/複数)/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、スローモード設定、タイムアウト/解除、キック、BAN、VC移動/切断/サーバーミュート/サーバースピーカーミュート、待機/ランダム待機、リックロール表示、ランダム画像表示（`/h`と同じ、NSFWチャンネル限定）、ランダムメッセージ送信\n"
+        "- メンバー参加/退出・VC参加/退出トリガーは、メッセージが存在しないため実行先チャンネル（`channel_id`）の指定が必須です\n"
+        "- BAN・キック・タイムアウト・ロール操作・ニックネーム変更・メッセージ削除/固定・スレッド作成・チャンネル編集・VC操作などの管理アクションは、**実行のたびに**アップロードした本人とBot自身が実際にその権限を持っているかを再チェックしてから実行します\n"
         "- 検証（必須項目・型・値の範囲）に通らないスクリプトは登録できません\n"
         "- サーバーあたり最大10個まで登録可能\n"
+        "- 過去に作成した古いスクリプト（メッセージ受信トリガーのみの単純な構成）もそのままアップロード可能です\n"
         "必要権限: サーバー管理権限"
     ),
     "scriptlist": (
@@ -1763,6 +1802,11 @@ class _BtnPurge(discord.ui.Button):
             await i.response.send_message("メッセージ管理権限が必要です。", ephemeral=True); return
         await i.response.send_modal(PurgeModal(self.ch))
 
+class _BtnScriptBuilder(discord.ui.Button):
+    def __init__(self): super().__init__(label="スクリプトビルダーを開く", style=discord.ButtonStyle.secondary, row=3)
+    async def callback(self, i):
+        await i.response.send_message("http://mamechosu.cloudfree.jp/dc/mb/sb.html", ephemeral=True)
+
 # ── AIチャット関連ボタン表示用 ──────────────────────
 class _BtnStartAIChat(discord.ui.Button):
     def __init__(self, gid, cid):
@@ -2040,6 +2084,7 @@ class CPView(discord.ui.View):
             self.add_item(_BtnEditRolePanel(gid, cid))
             self.add_item(_BtnEditRolePanelDisplay(gid, cid))
             self.add_item(_BtnGlobalChat(gid, cid))
+            self.add_item(_BtnScriptBuilder())
             if ch:
                 self.add_item(_BtnPurge(ch))
         
@@ -2099,11 +2144,12 @@ async def cmd_cp(interaction: discord.Interaction):
 # ──────────────────────────────────────────────
 class DMPasswordModal(discord.ui.Modal, title="パスワード入力"):
     pw = discord.ui.TextInput(label="パスワード", required=True)
-    def __init__(self, guild_id: int, role_id: int, correct_pw: str):
+    def __init__(self, guild_id: int, role_id: int, correct_pw: str, view: "DMPasswordView" = None):
         super().__init__()
         self.guild_id = guild_id
         self.role_id = role_id
         self.correct_pw = correct_pw
+        self.view_ref = view
     async def on_submit(self, interaction: discord.Interaction):
         guild = bot.get_guild(self.guild_id)
         if not guild:
@@ -2128,19 +2174,30 @@ class DMPasswordModal(discord.ui.Modal, title="パスワード入力"):
                     await interaction.response.send_message(f"エラー: {e}", ephemeral=True)
             else:
                 await interaction.response.send_message("ロールが見つかりません。", ephemeral=True)
+            # パスワード一致で用件が済んだので、DMのパスワード入力メッセージは確実に削除する
+            if self.view_ref is not None:
+                self.view_ref.stop()
+                if self.view_ref.message is not None:
+                    await _confirm_delete(self.view_ref.message)
         else:
             await interaction.response.send_message("パスワードが違います。", ephemeral=True)
 
 class DMPasswordView(discord.ui.View):
     def __init__(self, guild_id: int, role_id: int, correct_pw: str):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)  # 10分
         self.guild_id = guild_id
         self.role_id = role_id
         self.correct_pw = correct_pw
-        
+        self.message: discord.Message | None = None  # 送信後に呼び出し元がセットする
+
     @discord.ui.button(label="パスワードを入力", style=discord.ButtonStyle.primary)
     async def btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DMPasswordModal(self.guild_id, self.role_id, self.correct_pw))
+        await interaction.response.send_modal(DMPasswordModal(self.guild_id, self.role_id, self.correct_pw, view=self))
+
+    async def on_timeout(self):
+        # 10分経過しても未入力の場合は、確実に削除できたことを確認してから終了する
+        if self.message is not None:
+            await _confirm_delete(self.message)
 
 @bot.tree.command(name="rolepanel", description="ロールパネルを作成します")
 @app_commands.describe(roles_and_emojis="例: 🍎:@Role1, 🍇:@Role2", title="タイトル", subtitle="サブタイトル（省略可）",
@@ -2309,6 +2366,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
 
     try:
+        await process_customscript_reaction(payload)
+    except Exception as e:
+        db_log("customscript_reaction_trigger_failed", str(e), level="WARN")
+
+    try:
         panel_data = db_read("reaction_roles", shared=str(payload.message_id))
         if not panel_data or not isinstance(panel_data, dict):
             return
@@ -2359,7 +2421,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if role >= guild.me.top_role:
             if ch:
                 try:
-                    await ch.send(f"{member.mention} 権限エラー: Botのロール ({guild.me.top_role.name}) より上位のロールは操作できません。", delete_after=10, silent=True)
+                    await send_temp(ch, f"{member.mention} 権限エラー: Botのロール ({guild.me.top_role.name}) より上位のロールは操作できません。", delete_after=10)
                 except Exception:
                     pass
             return
@@ -2367,11 +2429,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if pw:
             try:
                 view = DMPasswordView(guild.id, role_id, pw)
-                await member.send(f"サーバー「{guild.name}」のロール **{role.name}** を取得/解除するにはパスワードが必要です。", view=view)
+                view.message = await member.send(f"サーバー「{guild.name}」のロール **{role.name}** を取得/解除するにはパスワードが必要です。", view=view)
             except discord.Forbidden:
                 if ch:
                     try:
-                        await ch.send(f"{member.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてもう一度お試しください。", delete_after=10, silent=True)
+                        await send_temp(ch, f"{member.mention} DMを送信できませんでした。サーバーからのDMを許可設定にしてもう一度お試しください。", delete_after=10)
                     except Exception:
                         pass
         else:
@@ -2379,12 +2441,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 if role in member.roles:
                     await member.remove_roles(role)
                     if ch:
-                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を外しました。", delete_after=5, silent=True)
+                        try: await send_temp(ch, f"{member.mention} サーバー「{guild.name}」で **{role.name}** を外しました。", delete_after=5)
                         except Exception: pass
                 else:
                     await member.add_roles(role)
                     if ch:
-                        try: await ch.send(f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5, silent=True)
+                        try: await send_temp(ch, f"{member.mention} サーバー「{guild.name}」で **{role.name}** を付与しました。", delete_after=5)
                         except Exception: pass
                 if ch and msg:
                     embed = _build_rolepanel_embed(guild, panel_data.get("title", "ロールパネル"), roles, pw,
@@ -2405,6 +2467,7 @@ async def on_member_join(member: discord.Member):
         ch = member.guild.get_channel(ch_id)
         if ch:
             await ch.send(msg.replace("{user}", member.mention).replace("{members}", str(member.guild.member_count)))
+    await process_customscript_member_event(member, "on_member_join")
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -2415,6 +2478,7 @@ async def on_member_remove(member: discord.Member):
         ch = member.guild.get_channel(ch_id)
         if ch:
             await ch.send(msg.replace("{user}", member.display_name).replace("{members}", str(member.guild.member_count)))
+    await process_customscript_member_event(member, "on_member_leave")
 
 
 # ──────────────────────────────────────────────
@@ -2537,6 +2601,16 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if after.channel is not None:
             _vc_join_times[guild_id][user_id] = now
 
+    # カスタムスクリプト: VC参加/退出トリガー（チャンネル移動は「元chから退出」+「新chへ参加」の両方として扱う）
+    try:
+        if before.channel != after.channel:
+            if after.channel is not None:
+                await process_customscript_voice(member, "on_voice_join", after.channel)
+            if before.channel is not None:
+                await process_customscript_voice(member, "on_voice_leave", before.channel)
+    except Exception as e:
+        db_log("customscript_voice_trigger_failed", str(e), level="WARN")
+
 # ──────────────────────────────────────────────
 # 互換モード用（FakeInteraction / ModalProxy）
 # ──────────────────────────────────────────────
@@ -2564,9 +2638,9 @@ class FakeResponse:
         self.is_done = True
         try:
             view = ModalProxyView(modal)
-            await self.message.channel.send(
+            await send_temp(self.message.channel,
                 f"{self.message.author.mention} 互換モード（~コマンド）では直接入力画面を表示できません。\n以下のボタンから入力画面を開いてください。",
-                view=view, delete_after=120, silent=True)
+                view=view, delete_after=120)
         except Exception:
             pass
 
@@ -2748,9 +2822,9 @@ async def on_message(message: discord.Message):
             if re.search(r'\b' + re.escape(w) + r'\b', content_lower) if w.isascii() else (w in content_lower):
                 try:
                     await message.delete()
-                    await message.channel.send(
+                    await send_temp(message.channel,
                         f"{message.author.mention} 禁止ワードが含まれていたため削除しました。",
-                        delete_after=5, silent=True)
+                        delete_after=5)
                 except Exception:
                     pass
                 return
@@ -2881,17 +2955,26 @@ CUSTOMSCRIPT_MAX_TIMEOUT_SEC     = 28 * 24 * 3600     # timeout の最大値 (Di
 CUSTOMSCRIPT_MAX_SCRIPTS_PER_GUILD = 10               # サーバーあたりの最大登録スクリプト数
 CUSTOMSCRIPT_MAX_FILE_BYTES      = 256 * 1024         # アップロード可能な最大ファイルサイズ
 
-CUSTOMSCRIPT_TRIGGER_TYPES   = {"on_message"}
+CUSTOMSCRIPT_TRIGGER_TYPES = {
+    "on_message", "on_member_join", "on_member_leave",
+    "on_reaction_add", "on_voice_join", "on_voice_leave",
+}
+# これらのトリガーはメッセージ発生源が無いため、実行先チャンネルをchannel_idで明示する必要がある
+CUSTOMSCRIPT_TRIGGER_CHANNEL_REQUIRED = {
+    "on_member_join", "on_member_leave", "on_voice_join", "on_voice_leave",
+}
+CUSTOMSCRIPT_VOICE_TRIGGER_TYPES = {"on_voice_join", "on_voice_leave"}
 CUSTOMSCRIPT_CONDITION_TYPES = {"any", "equals", "contains", "startswith", "endswith"}
 CUSTOMSCRIPT_ACTION_TYPES    = {
     "delay", "random_delay",
     "send_message", "reply", "send_embed", "send_dm", "send_to_channel",
-    "add_reaction", "remove_all_reactions",
+    "add_reaction", "remove_all_reactions", "add_multiple_reactions",
     "delete_message", "pin_message", "unpin_message",
     "add_role", "remove_role", "set_nickname",
-    "create_thread", "set_channel_topic",
+    "create_thread", "set_channel_topic", "set_slowmode",
     "timeout", "remove_timeout", "kick", "ban",
-    "rickroll", "random_image",
+    "move_voice_channel", "disconnect_voice", "set_voice_mute", "set_voice_deafen",
+    "rickroll", "random_image", "random_message",
 }
 # 管理系アクションの実行に必要な権限（アップロード者・Bot双方をチェック）
 CUSTOMSCRIPT_ACTION_PERMISSIONS = {
@@ -2902,7 +2985,9 @@ CUSTOMSCRIPT_ACTION_PERMISSIONS = {
     "timeout": "moderate_members", "remove_timeout": "moderate_members",
     "set_nickname": "manage_nicknames",
     "create_thread": "create_public_threads",
-    "set_channel_topic": "manage_channels",
+    "set_channel_topic": "manage_channels", "set_slowmode": "manage_channels",
+    "move_voice_channel": "move_members", "disconnect_voice": "move_members",
+    "set_voice_mute": "mute_members", "set_voice_deafen": "deafen_members",
 }
 # send_to_channel と random_image はチャンネル単位/NSFW判定の個別チェックが必要なため上の辞書には含めない
 
@@ -2915,9 +3000,20 @@ def validate_customscript(data) -> tuple[bool, str]:
     trigger = data["trigger"]
     if not isinstance(trigger, dict) or trigger.get("type") not in CUSTOMSCRIPT_TRIGGER_TYPES:
         return False, f"trigger.type は {sorted(CUSTOMSCRIPT_TRIGGER_TYPES)} のいずれかである必要があります。"
+    ttype = trigger.get("type")
+
     ch_id = trigger.get("channel_id")
-    if ch_id is not None and not str(ch_id).isdigit():
+    if ttype in CUSTOMSCRIPT_TRIGGER_CHANNEL_REQUIRED:
+        if not str(ch_id or "").isdigit():
+            return False, f"trigger.channel_id は {ttype} では必須です（実行先チャンネルの数字ID）。"
+    elif ch_id is not None and not str(ch_id).isdigit():
         return False, "trigger.channel_id は数字のIDである必要があります。"
+
+    if ttype in CUSTOMSCRIPT_VOICE_TRIGGER_TYPES:
+        vch = trigger.get("voice_channel_id")
+        if vch is not None and not str(vch).isdigit():
+            return False, "trigger.voice_channel_id は数字のIDである必要があります。"
+
     cond = trigger.get("condition")
     if cond is not None:
         if not isinstance(cond, dict) or cond.get("type") not in CUSTOMSCRIPT_CONDITION_TYPES:
@@ -2980,6 +3076,10 @@ def validate_customscript(data) -> tuple[bool, str]:
         elif t == "add_reaction":
             if not isinstance(act.get("emoji"), str) or not act["emoji"]:
                 return False, f"actions[{idx}].emoji は必須です。"
+        elif t == "add_multiple_reactions":
+            emojis = act.get("emojis")
+            if not isinstance(emojis, list) or not (1 <= len(emojis) <= 10) or not all(isinstance(e, str) and e for e in emojis):
+                return False, f"actions[{idx}].emojis は1〜10個の絵文字を含む配列である必要があります。"
         elif t in ("add_role", "remove_role"):
             if not str(act.get("role_id", "")).isdigit():
                 return False, f"actions[{idx}].role_id は数字のIDである必要があります。"
@@ -2998,15 +3098,36 @@ def validate_customscript(data) -> tuple[bool, str]:
                 return False, f"actions[{idx}].topic は文字列である必要があります。"
             if len(topic) > 1024:
                 return False, f"actions[{idx}].topic は1024文字以内である必要があります。"
+        elif t == "set_slowmode":
+            sec = act.get("seconds")
+            if not isinstance(sec, (int, float)) or isinstance(sec, bool) or sec < 0:
+                return False, f"actions[{idx}].seconds は0以上の数値である必要があります。"
+            if sec > 21600:
+                return False, f"actions[{idx}].seconds は最大21600秒（6時間）までです。"
         elif t == "timeout":
             sec = act.get("seconds")
             if not isinstance(sec, (int, float)) or isinstance(sec, bool) or sec <= 0:
                 return False, f"actions[{idx}].seconds は正の数値である必要があります。"
             if sec > CUSTOMSCRIPT_MAX_TIMEOUT_SEC:
                 return False, f"actions[{idx}].seconds は最大{CUSTOMSCRIPT_MAX_TIMEOUT_SEC}秒（28日）までです。"
+        elif t == "move_voice_channel":
+            if not str(act.get("target_channel_id", "")).isdigit():
+                return False, f"actions[{idx}].target_channel_id は数字のIDである必要があります。"
+        elif t == "set_voice_mute":
+            if not isinstance(act.get("mute"), bool):
+                return False, f"actions[{idx}].mute は true/false である必要があります。"
+        elif t == "set_voice_deafen":
+            if not isinstance(act.get("deafen"), bool):
+                return False, f"actions[{idx}].deafen は true/false である必要があります。"
+        elif t == "random_message":
+            msgs = act.get("messages")
+            if not isinstance(msgs, list) or not (1 <= len(msgs) <= 10) or not all(isinstance(m, str) and m.strip() for m in msgs):
+                return False, f"actions[{idx}].messages は1〜10個の空でない文字列を含む配列である必要があります。"
+            if any(len(m) > 2000 for m in msgs):
+                return False, f"actions[{idx}].messages の各要素は2000文字以内である必要があります。"
         # remove_timeout / delete_message / remove_all_reactions / pin_message / unpin_message /
-        # kick / ban / rickroll / random_image は追加パラメータ不要
-        # （kick/ban はトリガーしたメッセージの送信者、delete系/pin系はそのメッセージ自体が対象）
+        # kick / ban / rickroll / random_image / disconnect_voice は追加パラメータ不要
+        # （kick/ban/timeout/voice系はトリガーの対象ユーザー、delete系/pin系はそのメッセージ自体が対象）
     return True, ""
 
 def _customscript_condition_match(cond: dict | None, content: str) -> bool:
@@ -3070,6 +3191,10 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
                     db_log("customscript_permission_denied", f"action=send_to_channel channel={action['channel_id']}", level="WARN")
         elif t == "add_reaction":
             await message.add_reaction(action["emoji"])
+        elif t == "add_multiple_reactions":
+            for emoji in action.get("emojis", [])[:10]:
+                try: await message.add_reaction(emoji)
+                except Exception: pass
         elif t == "remove_all_reactions":
             await message.clear_reactions()
         elif t == "delete_message":
@@ -3105,13 +3230,35 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
             if message.author.top_role < message.guild.me.top_role:
                 await message.author.ban(reason="カスタムスクリプトによる自動実行", delete_message_seconds=0)
 
+        # ── ボイスチャンネル操作系 ──
+        elif t == "move_voice_channel":
+            target_vc = message.guild.get_channel(int(action["target_channel_id"]))
+            if target_vc and message.author.voice:
+                await message.author.move_to(target_vc, reason="カスタムスクリプトによる自動実行")
+        elif t == "disconnect_voice":
+            if message.author.voice:
+                await message.author.move_to(None, reason="カスタムスクリプトによる自動実行")
+        elif t == "set_voice_mute":
+            if message.author.voice:
+                await message.author.edit(mute=bool(action.get("mute", True)), reason="カスタムスクリプトによる自動実行")
+        elif t == "set_voice_deafen":
+            if message.author.voice:
+                await message.author.edit(deafen=bool(action.get("deafen", True)), reason="カスタムスクリプトによる自動実行")
+
         # ── チャンネル操作系 ──
         elif t == "create_thread":
             await message.create_thread(name=action["name"][:100])
         elif t == "set_channel_topic":
             await message.channel.edit(topic=action.get("topic", "")[:1024], reason="カスタムスクリプトによる自動実行")
+        elif t == "set_slowmode":
+            sec = min(int(action.get("seconds", 0)), 21600)
+            await message.channel.edit(slowmode_delay=max(0, sec), reason="カスタムスクリプトによる自動実行")
 
         # ── お楽しみ系 ──
+        elif t == "random_message":
+            msgs = action.get("messages", [])
+            if msgs:
+                await message.channel.send(random.choice(msgs)[:2000])
         elif t == "rickroll":
             import io
             url = random.choice(RICK_GIFS)
@@ -3185,6 +3332,109 @@ async def process_customscripts(message: discord.Message):
         if not _customscript_condition_match(trigger.get("condition"), message.content):
             continue
         asyncio.create_task(run_customscript(script, message, entry.get("uploader_id")))
+
+class _PseudoMessage:
+    """メッセージそのものが存在しないトリガー（参加/退出/リアクション/VC）用の簡易コンテキスト。
+    channel.send() 等 discord.Message と共通の操作はそのまま動くが、reply/add_reaction/delete等の
+    「実メッセージ」を要求するアクションは呼び出し時にAttributeErrorとなり、通常の例外処理で安全にスキップされる。"""
+    def __init__(self, guild, channel, author):
+        self.guild = guild
+        self.channel = channel
+        self.author = author
+
+async def _resolve_customscript_channel(guild: discord.Guild, channel_id):
+    if not channel_id:
+        return None
+    try:
+        return guild.get_channel_or_thread(int(channel_id))
+    except (TypeError, ValueError):
+        return None
+
+async def process_customscript_member_event(member: discord.Member, event_type: str):
+    if member.bot:
+        return
+    guild = member.guild
+    store = db_read("customscript", guild_id=guild.id)
+    if not isinstance(store, dict) or not store:
+        return
+    for entry in store.values():
+        if not isinstance(entry, dict) or not entry.get("enabled", True):
+            continue
+        script = entry.get("data", {})
+        trigger = script.get("trigger", {})
+        if trigger.get("type") != event_type:
+            continue
+        ch = await _resolve_customscript_channel(guild, trigger.get("channel_id"))
+        if not ch:
+            continue
+        ctx = _PseudoMessage(guild, ch, member)
+        asyncio.create_task(run_customscript(script, ctx, entry.get("uploader_id")))
+
+async def process_customscript_reaction(payload: discord.RawReactionActionEvent):
+    if not payload.guild_id or not bot.user or payload.user_id == bot.user.id:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    store = db_read("customscript", guild_id=guild.id)
+    if not isinstance(store, dict) or not store:
+        return
+    relevant = [e for e in store.values()
+                if isinstance(e, dict) and e.get("enabled", True)
+                and e.get("data", {}).get("trigger", {}).get("type") == "on_reaction_add"]
+    if not relevant:
+        return
+
+    member = guild.get_member(payload.user_id)
+    if not member:
+        try: member = await guild.fetch_member(payload.user_id)
+        except Exception: return
+    if not member or member.bot:
+        return
+
+    emoji_str = str(payload.emoji)
+    ch = guild.get_channel_or_thread(payload.channel_id)
+    if not ch:
+        return
+    msg = None
+    try:
+        msg = await ch.fetch_message(payload.message_id)
+    except Exception:
+        pass
+
+    for entry in relevant:
+        script = entry["data"]
+        trigger = script.get("trigger", {})
+        ch_id = trigger.get("channel_id")
+        if ch_id and str(payload.channel_id) != str(ch_id):
+            continue
+        if not _customscript_condition_match(trigger.get("condition"), emoji_str):
+            continue
+        ctx = msg if msg is not None else _PseudoMessage(guild, ch, member)
+        asyncio.create_task(run_customscript(script, ctx, entry.get("uploader_id")))
+
+async def process_customscript_voice(member: discord.Member, event_type: str, voice_channel):
+    if member.bot:
+        return
+    guild = member.guild
+    store = db_read("customscript", guild_id=guild.id)
+    if not isinstance(store, dict) or not store:
+        return
+    for entry in store.values():
+        if not isinstance(entry, dict) or not entry.get("enabled", True):
+            continue
+        script = entry.get("data", {})
+        trigger = script.get("trigger", {})
+        if trigger.get("type") != event_type:
+            continue
+        vfilter = trigger.get("voice_channel_id")
+        if vfilter and (not voice_channel or str(voice_channel.id) != str(vfilter)):
+            continue
+        ch = await _resolve_customscript_channel(guild, trigger.get("channel_id"))
+        if not ch:
+            continue
+        ctx = _PseudoMessage(guild, ch, member)
+        asyncio.create_task(run_customscript(script, ctx, entry.get("uploader_id")))
 
 @bot.tree.command(name="uploadscript", description="カスタムスクリプト(.json)をアップロードして登録します")
 @app_commands.describe(file="Web GUI(Blockly)で作成したスクリプトの.jsonファイル")
@@ -5733,9 +5983,9 @@ async def relay_global_message(message: discord.Message):
             await message.delete()
         except: pass
         try:
-            await message.channel.send(
+            await send_temp(message.channel,
                 f"{message.author.mention} グローバルチャットではメンション（ユーザー・everyone/here・ロール）を送信できません。",
-                delete_after=8, silent=True)
+                delete_after=8)
         except: pass
         return
 
@@ -5767,7 +6017,7 @@ async def relay_global_message(message: discord.Message):
         )
         view = GlobalChatTosView()
         try:
-            await message.channel.send(f"{message.author.mention}\n{tos_text}", view=view, delete_after=120, silent=True)
+            await send_temp(message.channel, f"{message.author.mention}\n{tos_text}", view=view, delete_after=120)
         except Exception:
             pass
         return
@@ -5787,15 +6037,15 @@ async def relay_global_message(message: discord.Message):
             _global_user_blocks[user_id] = now + 300  # 5分ブロック
             message.author._global_spam_violations = 0
             try:
-                await message.channel.send(
+                await send_temp(message.channel,
                     f"{message.author.mention} [警告] 連投スパムが検出されたため、5分間グローバルチャットの利用を一時停止（ブロック）しました。",
-                    delete_after=8, silent=True)
+                    delete_after=8)
             except: pass
         else:
             try:
-                await message.channel.send(
+                await send_temp(message.channel,
                     f"{message.author.mention} [警告] グローバルチャットへの送信速度が早すぎます。少し時間をおいてから送信してください。",
-                    delete_after=8, silent=True)
+                    delete_after=8)
             except: pass
         return
     
@@ -5807,9 +6057,9 @@ async def relay_global_message(message: discord.Message):
             await message.delete()
         except: pass
         try:
-            await message.channel.send(
+            await send_temp(message.channel,
                 f"{message.author.mention} [警告] 10秒以内に同じ内容のメッセージを連投することはできません。",
-                delete_after=8, silent=True)
+                delete_after=8)
         except: pass
         return
 
@@ -6607,11 +6857,11 @@ async def _groq_chat_reply(char: CharacterSettings, history: list, base_topic: s
                     err_text = await res.text()
                     if channel_id:
                         ch = bot.get_channel(channel_id)
-                        if ch: await ch.send(f"[警告] Groq API Error ({res.status}): `{err_text[:100]}`", delete_after=10, silent=True)
+                        if ch: await send_temp(ch, f"[警告] Groq API Error ({res.status}): `{err_text[:100]}`", delete_after=10)
     except Exception as e:
         if channel_id:
             ch = bot.get_channel(channel_id)
-            if ch: await ch.send(f"[警告] Chat Exception: `{str(e)[:100]}`", delete_after=10, silent=True)
+            if ch: await send_temp(ch, f"[警告] Chat Exception: `{str(e)[:100]}`", delete_after=10)
     return ""
 
 async def _chat_loop(channel_id: int):
