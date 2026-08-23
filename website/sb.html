@@ -3,26 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Script Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/blockly/blockly.min.js"></script>
 <style>
   :root{
-    --bg-app:     #F6F7FB;
+    --bg-app:     #F4F5F7;
     --bg-panel:   #FFFFFF;
-    --line:       #E6E8EF;
+    --line:       #E2E4EA;
     --text-hi:    #14151A;
-    --text-mid:   #5B5F6B;
-    --text-dim:   #9AA0AC;
+    --text-mid:   #585C66;
+    --text-dim:   #9296A1;
     --indigo:     #4F46E5;
-    --indigo-hi:  #6366F1;
     --indigo-soft:#EEF0FF;
-    --coral:      #FF6B4A;   /* ダウンロード = このツールのゴール */
-    --coral-hi:   #FF8264;
-    --danger:     #EF4444;
-    --radius:     12px;
+    --coral:      #FF5A36;
+    --coral-soft: #FFEDE8;
+    --radius:     8px;
   }
   *{ box-sizing:border-box; }
   html,body{ height:100%; margin:0; }
@@ -35,112 +32,100 @@
     overflow:hidden;
   }
 
-  /* ── ヘッダー ── */
+  /* ── ヘッダー（フラット） ── */
   header{
     display:flex;
     align-items:center;
-    gap:14px;
-    padding:16px 24px;
+    gap:12px;
+    padding:14px 22px;
     background:var(--bg-panel);
     border-bottom:1px solid var(--line);
     flex-shrink:0;
   }
   .mark{
-    width:36px; height:36px; border-radius:10px;
-    background:linear-gradient(135deg, var(--indigo), var(--indigo-hi));
+    width:32px; height:32px; border-radius:7px;
+    background:var(--indigo);
     display:flex; align-items:center; justify-content:center;
-    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px;
     color:#fff;
     flex-shrink:0;
-    box-shadow:0 8px 18px -8px rgba(79,70,229,.55);
   }
   .title-block h1{
     font-family:'Space Grotesk',sans-serif;
-    font-size:17px; font-weight:600; letter-spacing:.01em;
+    font-size:16px; font-weight:600; letter-spacing:.01em;
     margin:0; line-height:1.2; color:var(--text-hi);
   }
   .title-block p{
-    margin:2px 0 0; font-size:12.5px; color:var(--text-dim);
+    margin:2px 0 0; font-size:12px; color:var(--text-dim);
   }
   .flow{
     margin-left:auto;
-    display:flex; align-items:center; gap:7px;
+    display:flex; align-items:center; gap:6px;
     font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-mid);
   }
   .flow span.node{
-    padding:4px 10px; border-radius:999px; background:var(--indigo-soft);
-    border:1px solid #DFE1FF; color:var(--indigo);
+    padding:4px 10px; border-radius:999px; background:var(--indigo-soft); color:var(--indigo);
   }
-  .flow .wire{ width:18px; height:1px; background:var(--line); position:relative; overflow:visible; }
-  .flow .wire::after{
-    content:''; position:absolute; top:-2px; left:0; width:5px; height:5px; border-radius:50%;
-    background:var(--indigo-hi);
-    animation:travel 2.6s linear infinite;
-  }
-  @keyframes travel{ 0%{left:0;} 100%{left:14px;} }
-  @media (prefers-reduced-motion: reduce){ .flow .wire::after{ animation:none; left:7px; } }
+  .flow .wire{ width:16px; height:1px; background:var(--line); }
 
   /* ── ツールバー ── */
   .toolbar{
     display:flex; align-items:center; gap:10px;
-    padding:12px 24px; background:var(--bg-panel);
+    padding:10px 22px; background:var(--bg-panel);
     border-bottom:1px solid var(--line);
     flex-shrink:0; flex-wrap:wrap;
   }
   .toolbar label{ font-size:12px; color:var(--text-dim); margin-right:-4px; }
   .toolbar input[type=text]{
     background:var(--bg-app); border:1px solid var(--line); color:var(--text-hi);
-    border-radius:8px; padding:8px 11px; font-size:13px; font-family:'IBM Plex Mono',monospace;
+    border-radius:6px; padding:8px 10px; font-size:13px; font-family:'IBM Plex Mono',monospace;
     min-width:200px;
   }
-  .toolbar input[type=text]:focus{ outline:2px solid var(--indigo-hi); outline-offset:1px; border-color:var(--indigo); }
+  .toolbar input[type=text]:focus{ outline:2px solid var(--indigo); outline-offset:1px; border-color:var(--indigo); }
   .toolbar input[type=file]{ display:none; }
 
   button{
     font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
     border:1px solid var(--line); background:var(--bg-panel); color:var(--text-hi);
-    padding:9px 15px; border-radius:8px; cursor:pointer;
-    transition:transform .08s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+    padding:8px 14px; border-radius:6px; cursor:pointer;
+    transition:background .12s ease, border-color .12s ease;
   }
-  button:hover{ background:#FAFAFD; border-color:#D5D8E3; }
+  button:hover{ background:var(--bg-app); }
   button:active{ transform:translateY(1px); }
-  button:focus-visible{ outline:2px solid var(--indigo-hi); outline-offset:2px; }
+  button:focus-visible{ outline:2px solid var(--indigo); outline-offset:2px; }
 
   .btn-primary{
-    background:linear-gradient(135deg, var(--coral), var(--coral-hi));
-    border-color:transparent; color:#fff;
-    box-shadow:0 8px 20px -10px rgba(255,107,74,.65);
+    background:var(--coral);
+    border-color:var(--coral); color:#fff;
   }
-  .btn-primary:hover{ filter:brightness(1.04); }
+  .btn-primary:hover{ background:#E64F2D; border-color:#E64F2D; }
 
   .spacer{ flex:1; }
 
-  /* ── ワークスペース ── */
-  #workspace-wrap{ position:relative; flex:1; min-height:0; padding:14px 14px 0; }
+  /* ── ワークスペース（フラット） ── */
+  #workspace-wrap{ position:relative; flex:1; min-height:0; padding:12px; }
   #blockly-div{
-    position:absolute; inset:14px 14px 0 14px;
+    position:absolute; inset:12px;
     background:var(--bg-panel);
     border:1px solid var(--line);
     border-radius:var(--radius);
     overflow:hidden;
-    box-shadow:0 1px 2px rgba(20,21,26,.04);
   }
 
   .toast{
-    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(16px);
     background:var(--text-hi); color:#fff;
-    padding:11px 18px; border-radius:10px; font-size:13px;
-    opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
-    box-shadow:0 16px 34px -14px rgba(20,21,26,.5);
+    padding:10px 16px; border-radius:8px; font-size:13px;
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
     display:flex; align-items:center; gap:8px;
     z-index:50;
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
-  .toast .dot{ width:7px; height:7px; border-radius:50%; background:#8FE3B0; flex-shrink:0; }
+  .toast .dot{ width:6px; height:6px; border-radius:50%; background:#7FDDA0; flex-shrink:0; }
   .toast.err .dot{ background:#FF9C9C; }
 
-  ::-webkit-scrollbar{ width:10px; height:10px; }
-  ::-webkit-scrollbar-thumb{ background:#D8DAE3; border-radius:6px; }
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb{ background:#D4D7E0; border-radius:5px; }
 </style>
 </head>
 <body>
@@ -149,11 +134,12 @@
   <div class="mark">⌁</div>
   <div class="title-block">
     <h1>Script Builder</h1>
+    <p>Discord Bot 用ビジュアルスクリプトエディタ</p>
   </div>
   <div class="flow" aria-hidden="true">
-    <span class="node">受信</span><span class="wire"></span>
+    <span class="node">トリガー</span><span class="wire"></span>
     <span class="node">条件</span><span class="wire"></span>
-    <span class="node">実行</span>
+    <span class="node">アクション</span>
   </div>
 </header>
 
@@ -177,7 +163,9 @@
 
 <!-- ══════════════════════════════════════════════
      ブロック定義
-     Bot側スキーマ: { version, name, trigger:{type,channel_id,condition}, actions:[...] }
+     Bot側スキーマ: { version, name, trigger:{type,...}, actions:[...] }
+     旧バージョン（trigger.type="on_message"のみ・旧アクション集合のみ）のスクリプトも
+     そのままロード・実行できるよう、新フィールドは全て省略可能にしてある。
      ══════════════════════════════════════════════ -->
 <script>
 const CONDITION_OPTIONS = [
@@ -187,41 +175,116 @@ const CONDITION_OPTIONS = [
   ["で始まる",    "startswith"],
   ["で終わる",    "endswith"],
 ];
+const BOOL_OPTIONS = [["ON","true"],["OFF","false"]];
 
 const COLOUR_TRIGGER = '#10B981';
-const COLOUR_ACTION   = '#4F46E5';
-const COLOUR_MOD      = '#EF4444';
-const COLOUR_FUN      = '#EC4899';
+const COLOUR_ACTION  = '#4F46E5';
+const COLOUR_VOICE   = '#0EA5E9';
+const COLOUR_MOD     = '#EF4444';
+const COLOUR_FUN     = '#EC4899';
 
-Blockly.Blocks['event_on_message'] = {
+/* ── トリガー ── */
+Blockly.Blocks['trigger_on_message'] = {
   init: function() {
-    this.appendDummyInput()
-        .appendField('⚡ メッセージを受信したとき');
-    this.appendValueInput('CHANNEL_ID')
-        .setCheck(null)
+    this.appendDummyInput().appendField('⚡ メッセージを受信したとき');
+    this.appendValueInput('CHANNEL_ID').setCheck(null)
         .appendField('  対象チャンネルID(任意)');
     this.appendDummyInput()
         .appendField('  条件')
         .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
         .appendField(new Blockly.FieldTextInput(''), 'COND_VALUE');
-    this.appendStatementInput('ACTIONS')
-        .setCheck('action')
-        .appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
     this.setColour(COLOUR_TRIGGER);
-    this.setTooltip('メッセージを受信した時に発動するトリガーです。チャンネルIDと条件を空にすると全チャンネル・無条件で反応します。');
-    this.setDeletable(true);
+    this.setTooltip('メッセージを受信した時に発動します。チャンネルIDと条件を空にすると全チャンネル・無条件で反応します。');
+  }
+};
+
+Blockly.Blocks['trigger_on_member_join'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🚪 メンバーが参加したとき');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('新しいメンバーがサーバーに参加した時に発動します。メッセージが存在しないため実行先チャンネルの指定が必須です。');
+  }
+};
+
+Blockly.Blocks['trigger_on_member_leave'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🚶 メンバーが退出したとき');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがサーバーから退出した時に発動します。実行先チャンネルの指定が必須です。');
+  }
+};
+
+Blockly.Blocks['trigger_on_reaction_add'] = {
+  init: function() {
+    this.appendDummyInput().appendField('😀 リアクションが付いたとき');
+    this.appendValueInput('CHANNEL_ID').setCheck(null)
+        .appendField('  対象チャンネルID(任意)');
+    this.appendDummyInput()
+        .appendField('  絵文字条件')
+        .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
+        .appendField(new Blockly.FieldTextInput('👍'), 'COND_VALUE');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メッセージにリアクションが付いた時に発動します。絵文字条件は「完全一致」で特定の絵文字だけに絞り込めます。');
+  }
+};
+
+Blockly.Blocks['trigger_on_voice_join'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🔊 VCに参加したとき');
+    this.appendDummyInput()
+        .appendField('  対象VCのID(任意・絞り込み)')
+        .appendField(new Blockly.FieldTextInput(''), 'VOICE_CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがボイスチャンネルに参加した時に発動します。VCのIDを指定すると特定のVCのみに絞り込めます。');
+  }
+};
+
+Blockly.Blocks['trigger_on_voice_leave'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🔈 VCから退出したとき');
+    this.appendDummyInput()
+        .appendField('  対象VCのID(任意・絞り込み)')
+        .appendField(new Blockly.FieldTextInput(''), 'VOICE_CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがボイスチャンネルから退出した時に発動します。');
   }
 };
 
 Blockly.Blocks['value_channel_id'] = {
   init: function() {
-    this.appendDummyInput()
-        .appendField(new Blockly.FieldTextInput(''), 'ID');
+    this.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'ID');
     this.setOutput(true, null);
     this.setColour(COLOUR_TRIGGER);
-    this.setTooltip('チャンネルIDを数字で入力（空欄=全チャンネル対象）。');
+    this.setTooltip('チャンネルIDを数字で入力（空欄=絞り込みなし）。');
   }
 };
+
+const TRIGGER_TYPES = [
+  ['trigger_on_message', '⚡ メッセージ受信'],
+  ['trigger_on_member_join', '🚪 メンバー参加'],
+  ['trigger_on_member_leave', '🚶 メンバー退出'],
+  ['trigger_on_reaction_add', '😀 リアクション追加'],
+  ['trigger_on_voice_join', '🔊 VC参加'],
+  ['trigger_on_voice_leave', '🔈 VC退出'],
+];
 
 function defineActionBlock(type, colour, tooltip, initFn) {
   Blockly.Blocks[type] = {
@@ -252,15 +315,20 @@ defineActionBlock('action_random_delay', COLOUR_ACTION, 'min〜maxミリ秒の�
 });
 
 /* ── メッセージ ── */
-defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーが発生したチャンネルにメッセージを送信します（最大2000文字）。', function() {
+defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーの実行先チャンネルにメッセージを送信します（最大2000文字）。', function() {
   this.appendDummyInput()
       .appendField('💬 メッセージ送信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
 });
-defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信（Discordのリプライ機能）します。', function() {
+defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信します（メッセージ受信/リアクショントリガーのみ有効）。', function() {
   this.appendDummyInput()
       .appendField('↩ 返信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_random_message', COLOUR_ACTION, '複数候補からランダムに1つ選んで送信します。「|」区切りで複数入力してください（最大10個）。', function() {
+  this.appendDummyInput()
+      .appendField('🔀 ランダムメッセージ送信')
+      .appendField(new Blockly.FieldTextInput('おはよう|こんにちは|こんばんは'), 'MESSAGES');
 });
 defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・色を指定してEmbedを送信します（タイトルか説明のどちらかは必須）。', function() {
   this.appendDummyInput().appendField('🖼 Embed送信');
@@ -274,7 +342,7 @@ defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・�
       .appendField('  色(16進・#無し)')
       .appendField(new Blockly.FieldTextInput('4F46E5'), 'COLOR');
 });
-defineActionBlock('action_send_dm', COLOUR_ACTION, '送信者にDMを送ります（DMを許可していない場合は何も起きません）。', function() {
+defineActionBlock('action_send_dm', COLOUR_ACTION, '対象ユーザーにDMを送ります（DMを許可していない場合は何も起きません）。', function() {
   this.appendDummyInput()
       .appendField('✉ DM送信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
@@ -289,10 +357,15 @@ defineActionBlock('action_send_to_channel', COLOUR_ACTION, '指定したチャ�
 });
 
 /* ── メッセージ操作 ── */
-defineActionBlock('action_add_reaction', COLOUR_ACTION, '受信したメッセージに絵文字リアクションを付けます。', function() {
+defineActionBlock('action_add_reaction', COLOUR_ACTION, 'メッセージに絵文字リアクションを1つ付けます（メッセージ受信/リアクショントリガーのみ有効）。', function() {
   this.appendDummyInput()
       .appendField('😀 リアクション付与')
       .appendField(new Blockly.FieldTextInput('👍'), 'EMOJI');
+});
+defineActionBlock('action_add_multiple_reactions', COLOUR_ACTION, '複数の絵文字リアクションをまとめて付けます。スペース区切りで最大10個。', function() {
+  this.appendDummyInput()
+      .appendField('😀😆 複数リアクション付与')
+      .appendField(new Blockly.FieldTextInput('👍 ❤️ 😆'), 'EMOJIS');
 });
 defineActionBlock('action_remove_all_reactions', COLOUR_ACTION, 'メッセージのリアクションをすべて削除します。', function() {
   this.appendDummyInput().appendField('🧹 リアクション全削除');
@@ -308,24 +381,24 @@ defineActionBlock('action_unpin_message', COLOUR_ACTION, 'メッセージのピ�
 });
 
 /* ── メンバー操作 ── */
-defineActionBlock('action_add_role', COLOUR_ACTION, '送信者にロールを付与します。', function() {
+defineActionBlock('action_add_role', COLOUR_ACTION, '対象ユーザーにロールを付与します。', function() {
   this.appendDummyInput()
       .appendField('➕ ロール付与  role_id:')
       .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
 });
-defineActionBlock('action_remove_role', COLOUR_ACTION, '送信者からロールを外します。', function() {
+defineActionBlock('action_remove_role', COLOUR_ACTION, '対象ユーザーからロールを外します。', function() {
   this.appendDummyInput()
       .appendField('➖ ロール剥奪  role_id:')
       .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
 });
-defineActionBlock('action_set_nickname', COLOUR_ACTION, '送信者のニックネームを変更します（空欄でリセット）。', function() {
+defineActionBlock('action_set_nickname', COLOUR_ACTION, '対象ユーザーのニックネームを変更します（空欄でリセット）。', function() {
   this.appendDummyInput()
       .appendField('✏ ニックネーム変更')
       .appendField(new Blockly.FieldTextInput(''), 'NICKNAME');
 });
 
 /* ── チャンネル操作 ── */
-defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します。', function() {
+defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します（メッセージ受信/リアクショントリガーのみ有効）。', function() {
   this.appendDummyInput()
       .appendField('🧵 スレッド作成  名前:')
       .appendField(new Blockly.FieldTextInput('スレッド'), 'NAME');
@@ -335,22 +408,48 @@ defineActionBlock('action_set_channel_topic', COLOUR_ACTION, 'このチャンネ
       .appendField('📝 チャンネルトピック変更')
       .appendField(new Blockly.FieldTextInput(''), 'TOPIC');
 });
+defineActionBlock('action_set_slowmode', COLOUR_ACTION, 'このチャンネルのスローモードを設定します（最大21600秒=6時間、0で解除）。', function() {
+  this.appendDummyInput()
+      .appendField('🐌 スローモード設定')
+      .appendField(new Blockly.FieldNumber(5, 0, 21600, 1), 'SECONDS')
+      .appendField('秒');
+});
+
+/* ── ボイスチャンネル操作 ── */
+defineActionBlock('action_move_voice_channel', COLOUR_VOICE, '対象ユーザーを指定のVCへ移動します。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput()
+      .appendField('➡ VC移動  target_channel_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'TARGET_CHANNEL_ID');
+});
+defineActionBlock('action_disconnect_voice', COLOUR_VOICE, '対象ユーザーをボイスチャンネルから切断します。', function() {
+  this.appendDummyInput().appendField('⏏ VC切断');
+});
+defineActionBlock('action_set_voice_mute', COLOUR_VOICE, '対象ユーザーをサーバーミュートON/OFFします。', function() {
+  this.appendDummyInput()
+      .appendField('🔇 サーバーミュート')
+      .appendField(new Blockly.FieldDropdown(BOOL_OPTIONS), 'MUTE');
+});
+defineActionBlock('action_set_voice_deafen', COLOUR_VOICE, '対象ユーザーをサーバースピーカーミュートON/OFFします。', function() {
+  this.appendDummyInput()
+      .appendField('🔕 サーバースピーカーミュート')
+      .appendField(new Blockly.FieldDropdown(BOOL_OPTIONS), 'DEAFEN');
+});
 
 /* ── モデレーション（要権限） ── */
-defineActionBlock('action_timeout', COLOUR_MOD, '送信者をタイムアウトします（最大28日）。実行時にあなたとBotの権限を再確認します。', function() {
+defineActionBlock('action_timeout', COLOUR_MOD, '対象ユーザーをタイムアウトします（最大28日）。実行時にあなたとBotの権限を再確認します。', function() {
   this.appendDummyInput()
       .appendField('🔇 タイムアウト')
       .appendField(new Blockly.FieldNumber(60, 1, 2419200, 1), 'SECONDS')
       .appendField('秒');
 });
-defineActionBlock('action_remove_timeout', COLOUR_MOD, '送信者のタイムアウトを解除します。', function() {
+defineActionBlock('action_remove_timeout', COLOUR_MOD, '対象ユーザーのタイムアウトを解除します。', function() {
   this.appendDummyInput().appendField('🔊 タイムアウト解除');
 });
-defineActionBlock('action_kick', COLOUR_MOD, '送信者をサーバーからキックします。実行時にあなたとBotの権限を再確認します。', function() {
-  this.appendDummyInput().appendField('🚪 送信者をキック');
+defineActionBlock('action_kick', COLOUR_MOD, '対象ユーザーをサーバーからキックします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🚪 キック');
 });
-defineActionBlock('action_ban', COLOUR_MOD, '送信者をサーバーからBANします。実行時にあなたとBotの権限を再確認します。', function() {
-  this.appendDummyInput().appendField('🔨 送信者をBAN');
+defineActionBlock('action_ban', COLOUR_MOD, '対象ユーザーをサーバーからBANします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🔨 BAN');
 });
 
 /* ── お楽しみ ── */
@@ -366,7 +465,12 @@ const toolbox = {
   contents: [
     { kind: 'category', name: 'トリガー', colour: COLOUR_TRIGGER,
       contents: [
-        { kind: 'block', type: 'event_on_message' },
+        { kind: 'block', type: 'trigger_on_message' },
+        { kind: 'block', type: 'trigger_on_member_join' },
+        { kind: 'block', type: 'trigger_on_member_leave' },
+        { kind: 'block', type: 'trigger_on_reaction_add' },
+        { kind: 'block', type: 'trigger_on_voice_join' },
+        { kind: 'block', type: 'trigger_on_voice_leave' },
         { kind: 'block', type: 'value_channel_id' },
       ]},
     { kind: 'category', name: '待機', colour: COLOUR_ACTION,
@@ -378,6 +482,7 @@ const toolbox = {
       contents: [
         { kind: 'block', type: 'action_send_message' },
         { kind: 'block', type: 'action_reply' },
+        { kind: 'block', type: 'action_random_message' },
         { kind: 'block', type: 'action_send_embed' },
         { kind: 'block', type: 'action_send_dm' },
         { kind: 'block', type: 'action_send_to_channel' },
@@ -385,6 +490,7 @@ const toolbox = {
     { kind: 'category', name: 'メッセージ操作', colour: COLOUR_ACTION,
       contents: [
         { kind: 'block', type: 'action_add_reaction' },
+        { kind: 'block', type: 'action_add_multiple_reactions' },
         { kind: 'block', type: 'action_remove_all_reactions' },
         { kind: 'block', type: 'action_delete_message' },
         { kind: 'block', type: 'action_pin_message' },
@@ -400,6 +506,14 @@ const toolbox = {
       contents: [
         { kind: 'block', type: 'action_create_thread' },
         { kind: 'block', type: 'action_set_channel_topic' },
+        { kind: 'block', type: 'action_set_slowmode' },
+      ]},
+    { kind: 'category', name: 'ボイスチャンネル操作', colour: COLOUR_VOICE,
+      contents: [
+        { kind: 'block', type: 'action_move_voice_channel' },
+        { kind: 'block', type: 'action_disconnect_voice' },
+        { kind: 'block', type: 'action_set_voice_mute' },
+        { kind: 'block', type: 'action_set_voice_deafen' },
       ]},
     { kind: 'category', name: 'モデレーション（要権限）', colour: COLOUR_MOD,
       contents: [
@@ -418,28 +532,29 @@ const toolbox = {
 
 const workspace = Blockly.inject('blockly-div', {
   toolbox: toolbox,
-  theme: Blockly.Theme.defineTheme('scriptBuilderLight', {
+  theme: Blockly.Theme.defineTheme('scriptBuilderFlat', {
     base: Blockly.Themes.Classic,
     componentStyles: {
       workspaceBackgroundColour: '#FFFFFF',
-      toolboxBackgroundColour: '#FAFAFD',
+      toolboxBackgroundColour: '#FAFAFC',
       toolboxForegroundColour: '#14151A',
-      flyoutBackgroundColour: '#FAFAFD',
+      flyoutBackgroundColour: '#FAFAFC',
       flyoutForegroundColour: '#14151A',
       flyoutOpacity: 1,
-      scrollbarColour: '#D8DAE3',
+      scrollbarColour: '#D4D7E0',
       insertionMarkerColour: '#4F46E5',
-      insertionMarkerOpacity: 0.4,
+      insertionMarkerOpacity: 0.35,
     }
   }),
-  grid: { spacing: 24, length: 2, colour: '#EEEFF4', snap: true },
+  grid: { spacing: 24, length: 2, colour: '#EDEEF2', snap: true },
   zoom: { controls: true, wheel: true, startScale: 0.9 },
   trashcan: true,
+  renderer: 'zelos',
 });
 
 // 初期状態：トリガーブロックを1つ置いておく
 (function seed(){
-  const b = workspace.newBlock('event_on_message');
+  const b = workspace.newBlock('trigger_on_message');
   b.initSvg(); b.render();
   b.moveBy(40, 40);
 })();
@@ -470,6 +585,8 @@ function actionBlockToJson(block) {
       return { type: 'send_message', content: block.getFieldValue('CONTENT') };
     case 'action_reply':
       return { type: 'reply', content: block.getFieldValue('CONTENT') };
+    case 'action_random_message':
+      return { type: 'random_message', messages: block.getFieldValue('MESSAGES').split('|').map(s => s.trim()).filter(Boolean) };
     case 'action_send_embed': {
       const out = { type: 'send_embed' };
       const title = block.getFieldValue('TITLE'); if (title) out.title = title;
@@ -483,6 +600,8 @@ function actionBlockToJson(block) {
       return { type: 'send_to_channel', channel_id: block.getFieldValue('CHANNEL_ID'), content: block.getFieldValue('CONTENT') };
     case 'action_add_reaction':
       return { type: 'add_reaction', emoji: block.getFieldValue('EMOJI') };
+    case 'action_add_multiple_reactions':
+      return { type: 'add_multiple_reactions', emojis: block.getFieldValue('EMOJIS').split(/\s+/).filter(Boolean) };
     case 'action_remove_all_reactions':
       return { type: 'remove_all_reactions' };
     case 'action_delete_message':
@@ -501,6 +620,16 @@ function actionBlockToJson(block) {
       return { type: 'create_thread', name: block.getFieldValue('NAME') };
     case 'action_set_channel_topic':
       return { type: 'set_channel_topic', topic: block.getFieldValue('TOPIC') };
+    case 'action_set_slowmode':
+      return { type: 'set_slowmode', seconds: Number(block.getFieldValue('SECONDS')) };
+    case 'action_move_voice_channel':
+      return { type: 'move_voice_channel', target_channel_id: block.getFieldValue('TARGET_CHANNEL_ID') };
+    case 'action_disconnect_voice':
+      return { type: 'disconnect_voice' };
+    case 'action_set_voice_mute':
+      return { type: 'set_voice_mute', mute: block.getFieldValue('MUTE') === 'true' };
+    case 'action_set_voice_deafen':
+      return { type: 'set_voice_deafen', deafen: block.getFieldValue('DEAFEN') === 'true' };
     case 'action_timeout':
       return { type: 'timeout', seconds: Number(block.getFieldValue('SECONDS')) };
     case 'action_remove_timeout':
@@ -518,29 +647,68 @@ function actionBlockToJson(block) {
   }
 }
 
+function triggerBlockToJson(trigger) {
+  switch (trigger.type) {
+    case 'trigger_on_message': {
+      const condType = trigger.getFieldValue('COND_TYPE');
+      const condValue = trigger.getFieldValue('COND_VALUE');
+      const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
+      let channelId = null;
+      const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
+      if (chBlock && chBlock.type === 'value_channel_id') {
+        const raw = (chBlock.getFieldValue('ID') || '').trim();
+        if (raw) channelId = raw;
+      }
+      return { type: 'on_message', channel_id: channelId, condition: condition };
+    }
+    case 'trigger_on_member_join':
+      return { type: 'on_member_join', channel_id: trigger.getFieldValue('CHANNEL_ID').trim() };
+    case 'trigger_on_member_leave':
+      return { type: 'on_member_leave', channel_id: trigger.getFieldValue('CHANNEL_ID').trim() };
+    case 'trigger_on_reaction_add': {
+      const condType = trigger.getFieldValue('COND_TYPE');
+      const condValue = trigger.getFieldValue('COND_VALUE');
+      const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
+      let channelId = null;
+      const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
+      if (chBlock && chBlock.type === 'value_channel_id') {
+        const raw = (chBlock.getFieldValue('ID') || '').trim();
+        if (raw) channelId = raw;
+      }
+      return { type: 'on_reaction_add', channel_id: channelId, condition: condition };
+    }
+    case 'trigger_on_voice_join':
+    case 'trigger_on_voice_leave': {
+      const out = {
+        type: trigger.type === 'trigger_on_voice_join' ? 'on_voice_join' : 'on_voice_leave',
+        channel_id: trigger.getFieldValue('CHANNEL_ID').trim(),
+      };
+      const vch = (trigger.getFieldValue('VOICE_CHANNEL_ID') || '').trim();
+      if (vch) out.voice_channel_id = vch;
+      return out;
+    }
+    default:
+      return null;
+  }
+}
+
 function buildScriptJson() {
-  const triggerBlocks = workspace.getTopBlocks(true).filter(b => b.type === 'event_on_message');
+  const allTriggerTypes = TRIGGER_TYPES.map(t => t[0]);
+  const triggerBlocks = workspace.getTopBlocks(true).filter(b => allTriggerTypes.includes(b.type));
   if (triggerBlocks.length === 0) {
-    throw new Error('「⚡ メッセージを受信したとき」ブロックが見つかりません。トリガーブロックを配置してください。');
+    throw new Error('トリガーブロックが見つかりません。「トリガー」カテゴリからブロックを配置してください。');
   }
   if (triggerBlocks.length > 1) {
     throw new Error('トリガーブロックは1つだけ配置してください（現在 ' + triggerBlocks.length + ' 個あります）。');
   }
-  const trigger = triggerBlocks[0];
-
-  const condType = trigger.getFieldValue('COND_TYPE');
-  const condValue = trigger.getFieldValue('COND_VALUE');
-  const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
-
-  let channelId = null;
-  const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
-  if (chBlock && chBlock.type === 'value_channel_id') {
-    const raw = (chBlock.getFieldValue('ID') || '').trim();
-    if (raw) channelId = raw;
+  const triggerBlock = triggerBlocks[0];
+  const trigger = triggerBlockToJson(triggerBlock);
+  if (!trigger) {
+    throw new Error('トリガーの内容を読み取れませんでした。');
   }
 
   const actions = [];
-  let cur = trigger.getInputTargetBlock('ACTIONS');
+  let cur = triggerBlock.getInputTargetBlock('ACTIONS');
   while (cur) {
     const a = actionBlockToJson(cur);
     if (a) actions.push(a);
@@ -555,16 +723,7 @@ function buildScriptJson() {
 
   const name = (document.getElementById('scriptName').value || 'スクリプト').trim().slice(0, 50);
 
-  return {
-    version: '1.0',
-    name: name,
-    trigger: {
-      type: 'on_message',
-      channel_id: channelId,
-      condition: condition,
-    },
-    actions: actions,
-  };
+  return { version: '1.1', name: name, trigger: trigger, actions: actions };
 }
 
 document.getElementById('btnDownload').addEventListener('click', () => {
@@ -591,24 +750,26 @@ document.getElementById('btnDownload').addEventListener('click', () => {
 document.getElementById('btnClear').addEventListener('click', () => {
   if (!confirm('ワークスペースをすべてクリアしますか？')) return;
   workspace.clear();
-  const b = workspace.newBlock('event_on_message');
+  const b = workspace.newBlock('trigger_on_message');
   b.initSvg(); b.render();
   b.moveBy(40, 40);
   showToast('クリアしました');
 });
 
 // ══════════════════════════════════════════════
-// JSON → Blockly 復元（既存スクリプトの再編集用）
+// JSON → Blockly 復元（既存スクリプトの再編集用。旧バージョンのスクリプトもそのまま読み込める）
 // ══════════════════════════════════════════════
 const ACTION_JSON_TO_BLOCK = {
   delay:        (a) => ({ type: 'action_delay', fields: { MS: a.ms ?? 1000 } }),
   random_delay: (a) => ({ type: 'action_random_delay', fields: { MIN_MS: a.min_ms ?? 500, MAX_MS: a.max_ms ?? 2000 } }),
   send_message: (a) => ({ type: 'action_send_message', fields: { CONTENT: a.content ?? '' } }),
   reply:        (a) => ({ type: 'action_reply', fields: { CONTENT: a.content ?? '' } }),
+  random_message: (a) => ({ type: 'action_random_message', fields: { MESSAGES: (a.messages ?? ['']).join('|') } }),
   send_embed:   (a) => ({ type: 'action_send_embed', fields: { TITLE: a.title ?? '', DESCRIPTION: a.description ?? '', COLOR: a.color ?? '4F46E5' } }),
   send_dm:      (a) => ({ type: 'action_send_dm', fields: { CONTENT: a.content ?? '' } }),
   send_to_channel: (a) => ({ type: 'action_send_to_channel', fields: { CHANNEL_ID: String(a.channel_id ?? ''), CONTENT: a.content ?? '' } }),
   add_reaction: (a) => ({ type: 'action_add_reaction', fields: { EMOJI: a.emoji ?? '👍' } }),
+  add_multiple_reactions: (a) => ({ type: 'action_add_multiple_reactions', fields: { EMOJIS: (a.emojis ?? ['👍']).join(' ') } }),
   remove_all_reactions: () => ({ type: 'action_remove_all_reactions', fields: {} }),
   delete_message: () => ({ type: 'action_delete_message', fields: {} }),
   pin_message:   () => ({ type: 'action_pin_message', fields: {} }),
@@ -618,6 +779,11 @@ const ACTION_JSON_TO_BLOCK = {
   set_nickname:  (a) => ({ type: 'action_set_nickname', fields: { NICKNAME: a.nickname ?? '' } }),
   create_thread: (a) => ({ type: 'action_create_thread', fields: { NAME: a.name ?? '' } }),
   set_channel_topic: (a) => ({ type: 'action_set_channel_topic', fields: { TOPIC: a.topic ?? '' } }),
+  set_slowmode:  (a) => ({ type: 'action_set_slowmode', fields: { SECONDS: a.seconds ?? 5 } }),
+  move_voice_channel: (a) => ({ type: 'action_move_voice_channel', fields: { TARGET_CHANNEL_ID: String(a.target_channel_id ?? '') } }),
+  disconnect_voice:   () => ({ type: 'action_disconnect_voice', fields: {} }),
+  set_voice_mute:   (a) => ({ type: 'action_set_voice_mute', fields: { MUTE: a.mute ? 'true' : 'false' } }),
+  set_voice_deafen: (a) => ({ type: 'action_set_voice_deafen', fields: { DEAFEN: a.deafen ? 'true' : 'false' } }),
   timeout:       (a) => ({ type: 'action_timeout', fields: { SECONDS: a.seconds ?? 60 } }),
   remove_timeout:() => ({ type: 'action_remove_timeout', fields: {} }),
   kick:          () => ({ type: 'action_kick', fields: {} }),
@@ -639,6 +805,43 @@ function actionJsonToBlock(action) {
   return block;
 }
 
+function buildTriggerBlock(trigger) {
+  // trigger.type が未知/未指定の場合も「メッセージ受信」として安全にフォールバックする（後方互換）
+  const ttype = trigger.type || 'on_message';
+  let block;
+
+  if (ttype === 'on_member_join' || ttype === 'on_member_leave') {
+    block = workspace.newBlock(ttype === 'on_member_join' ? 'trigger_on_member_join' : 'trigger_on_member_leave');
+    block.initSvg(); block.render();
+    block.setFieldValue(String(trigger.channel_id ?? ''), 'CHANNEL_ID');
+    return block;
+  }
+
+  if (ttype === 'on_voice_join' || ttype === 'on_voice_leave') {
+    block = workspace.newBlock(ttype === 'on_voice_join' ? 'trigger_on_voice_join' : 'trigger_on_voice_leave');
+    block.initSvg(); block.render();
+    block.setFieldValue(String(trigger.channel_id ?? ''), 'CHANNEL_ID');
+    if (trigger.voice_channel_id) block.setFieldValue(String(trigger.voice_channel_id), 'VOICE_CHANNEL_ID');
+    return block;
+  }
+
+  // on_message / on_reaction_add / 不明タイプ → メッセージ受信 or リアクション追加として復元
+  block = workspace.newBlock(ttype === 'on_reaction_add' ? 'trigger_on_reaction_add' : 'trigger_on_message');
+  block.initSvg(); block.render();
+
+  const cond = trigger.condition || { type: 'any' };
+  block.setFieldValue(cond.type || 'any', 'COND_TYPE');
+  if (cond.value) block.setFieldValue(String(cond.value), 'COND_VALUE');
+
+  if (trigger.channel_id) {
+    const chBlock = workspace.newBlock('value_channel_id');
+    chBlock.initSvg(); chBlock.render();
+    chBlock.setFieldValue(String(trigger.channel_id), 'ID');
+    block.getInput('CHANNEL_ID').connection.connect(chBlock.outputConnection);
+  }
+  return block;
+}
+
 function loadScriptJson(json) {
   if (!json || typeof json !== 'object' || !json.trigger || !Array.isArray(json.actions)) {
     throw new Error('このJSONは対応フォーマットではありません（trigger / actions が必要です）。');
@@ -647,26 +850,13 @@ function loadScriptJson(json) {
 
   document.getElementById('scriptName').value = json.name || 'スクリプト';
 
-  const trigger = workspace.newBlock('event_on_message');
-  trigger.initSvg(); trigger.render();
+  const trigger = buildTriggerBlock(json.trigger);
   trigger.moveBy(40, 40);
-
-  const cond = json.trigger.condition || { type: 'any' };
-  trigger.setFieldValue(cond.type || 'any', 'COND_TYPE');
-  if (cond.value) trigger.setFieldValue(String(cond.value), 'COND_VALUE');
-
-  if (json.trigger.channel_id) {
-    const chBlock = workspace.newBlock('value_channel_id');
-    chBlock.initSvg(); chBlock.render();
-    chBlock.setFieldValue(String(json.trigger.channel_id), 'ID');
-    const conn = trigger.getInput('CHANNEL_ID').connection;
-    conn.connect(chBlock.outputConnection);
-  }
 
   let prevConn = trigger.getInput('ACTIONS').connection;
   for (const action of json.actions) {
     const b = actionJsonToBlock(action);
-    if (!b) continue;
+    if (!b) continue;  // 未知のアクション種別はスキップ（将来バージョンとの前方互換のため落とさない）
     prevConn.connect(b.previousConnection);
     prevConn = b.nextConnection;
   }
