@@ -700,11 +700,13 @@ HELP_TEXT = {
     "scriptremove": (
         "**カスタムスクリプトを削除します。**\n"
         "使い方: `/scriptremove name:[スクリプト名]`\n"
+        "- `name` の入力欄には登録済みのスクリプト名が候補表示され、「🌐 すべて」を選ぶと登録済みスクリプトを一括削除できます\n"
         "必要権限: サーバー管理権限"
     ),
     "scripttoggle": (
         "**カスタムスクリプトのON/OFFを切り替えます。**\n"
         "使い方: `/scripttoggle name:[スクリプト名] state:[ON/OFF]`\n"
+        "- `name` の入力欄には登録済みのスクリプト名が候補表示され、「🌐 すべて」を選ぶと登録済みスクリプトを一括でON/OFFできます\n"
         "必要権限: サーバー管理権限"
     ),
     "reaction": (
@@ -3497,15 +3499,37 @@ async def cmd_scriptlist(interaction: discord.Interaction):
         lines.append(f"`{name}` [{state}] 登録者: {uploader.mention if uploader else '不明'} / アクション数: {n_actions}")
     await interaction.followup.send("\n".join(lines), ephemeral=True)
 
+async def _customscript_name_autocomplete(interaction: discord.Interaction, current: str):
+    store = db_read("customscript", guild_id=interaction.guild_id)
+    names = list(store.keys()) if isinstance(store, dict) else []
+    choices = [app_commands.Choice(name="🌐 すべて", value="all")]
+    for n in names:
+        if current.lower() in n.lower():
+            choices.append(app_commands.Choice(name=n, value=n))
+    return choices[:25]
+
 @bot.tree.command(name="scriptremove", description="カスタムスクリプトを削除します")
-@app_commands.describe(name="削除するスクリプト名")
+@app_commands.describe(name="削除するスクリプト名（「all」を選ぶと全て削除）")
+@app_commands.autocomplete(name=_customscript_name_autocomplete)
 async def cmd_scriptremove(interaction: discord.Interaction, name: str):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.followup.send("サーバー管理権限が必要です。", ephemeral=True)
         return
     store = db_read("customscript", guild_id=interaction.guild_id)
-    if not isinstance(store, dict) or name not in store:
+    if not isinstance(store, dict):
+        store = {}
+
+    if name.lower() == "all":
+        if not store:
+            await interaction.followup.send("削除できるスクリプトがありません。", ephemeral=True)
+            return
+        count = len(store)
+        db_write("customscript", {}, guild_id=interaction.guild_id)
+        await interaction.followup.send(f"登録済みスクリプト全{count}件を削除しました。", ephemeral=True)
+        return
+
+    if name not in store:
         await interaction.followup.send("そのスクリプトは見つかりません。`/scriptlist` で確認してください。", ephemeral=True)
         return
     del store[name]
@@ -3513,17 +3537,33 @@ async def cmd_scriptremove(interaction: discord.Interaction, name: str):
     await interaction.followup.send(f"`{name}` を削除しました。", ephemeral=True)
 
 @bot.tree.command(name="scripttoggle", description="カスタムスクリプトのON/OFFを切り替えます")
-@app_commands.describe(name="対象のスクリプト名", state="ON / OFF")
+@app_commands.describe(name="対象のスクリプト名（「all」を選ぶと全て切り替え）", state="ON / OFF")
+@app_commands.autocomplete(name=_customscript_name_autocomplete)
 async def cmd_scripttoggle(interaction: discord.Interaction, name: str, state: str):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.followup.send("サーバー管理権限が必要です。", ephemeral=True)
         return
     store = db_read("customscript", guild_id=interaction.guild_id)
-    if not isinstance(store, dict) or name not in store:
+    if not isinstance(store, dict):
+        store = {}
+    on = state.upper() == "ON"
+
+    if name.lower() == "all":
+        if not store:
+            await interaction.followup.send("対象のスクリプトがありません。", ephemeral=True)
+            return
+        for entry in store.values():
+            if isinstance(entry, dict):
+                entry["enabled"] = on
+        db_write("customscript", store, guild_id=interaction.guild_id)
+        await interaction.followup.send(f"登録済みスクリプト全{len(store)}件を {state.upper()} にしました。", ephemeral=True)
+        return
+
+    if name not in store:
         await interaction.followup.send("そのスクリプトは見つかりません。`/scriptlist` で確認してください。", ephemeral=True)
         return
-    store[name]["enabled"] = state.upper() == "ON"
+    store[name]["enabled"] = on
     db_write("customscript", store, guild_id=interaction.guild_id)
     await interaction.followup.send(f"`{name}` を {state.upper()} にしました。", ephemeral=True)
 
