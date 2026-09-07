@@ -178,6 +178,7 @@ const CONDITION_OPTIONS = [
 const BOOL_OPTIONS = [["ON","true"],["OFF","false"]];
 
 const COLOUR_TRIGGER = '#10B981';
+const TEMPLATE_HINT = ' 差し込み変数が使えます: {user} {user.name} {server} {channel} {member_count} {mention:ID} {role:ID} {random:A|B|C}';
 const COLOUR_ACTION  = '#4F46E5';
 const COLOUR_VOICE   = '#0EA5E9';
 const COLOUR_MOD     = '#EF4444';
@@ -315,22 +316,22 @@ defineActionBlock('action_random_delay', COLOUR_ACTION, 'min〜maxミリ秒の�
 });
 
 /* ── メッセージ ── */
-defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーの実行先チャンネルにメッセージを送信します（最大2000文字）。', function() {
+defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーの実行先チャンネルにメッセージを送信します（最大2000文字）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('💬 メッセージ送信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
 });
-defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信します（メッセージ受信/リアクショントリガーのみ有効）。', function() {
+defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信します（メッセージ受信/リアクショントリガーのみ有効）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('↩ 返信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
 });
-defineActionBlock('action_random_message', COLOUR_ACTION, '複数候補からランダムに1つ選んで送信します。「|」区切りで複数入力してください（最大10個）。', function() {
+defineActionBlock('action_random_message', COLOUR_ACTION, '複数候補からランダムに1つ選んで送信します。「|」区切りで複数入力してください（最大10個）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('🔀 ランダムメッセージ送信')
       .appendField(new Blockly.FieldTextInput('おはよう|こんにちは|こんばんは'), 'MESSAGES');
 });
-defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・色を指定してEmbedを送信します（タイトルか説明のどちらかは必須）。', function() {
+defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・色を指定してEmbedを送信します（タイトルか説明のどちらかは必須）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput().appendField('🖼 Embed送信');
   this.appendDummyInput()
       .appendField('  タイトル')
@@ -342,12 +343,12 @@ defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・�
       .appendField('  色(16進・#無し)')
       .appendField(new Blockly.FieldTextInput('4F46E5'), 'COLOR');
 });
-defineActionBlock('action_send_dm', COLOUR_ACTION, '対象ユーザーにDMを送ります（DMを許可していない場合は何も起きません）。', function() {
+defineActionBlock('action_send_dm', COLOUR_ACTION, '対象ユーザーにDMを送ります（DMを許可していない場合は何も起きません）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('✉ DM送信')
       .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
 });
-defineActionBlock('action_send_to_channel', COLOUR_ACTION, '指定したチャンネルIDにメッセージを送信します。送信先チャンネルであなた自身とBotの両方に送信権限が必要です。', function() {
+defineActionBlock('action_send_to_channel', COLOUR_ACTION, '指定したチャンネルIDにメッセージを送信します。送信先チャンネルであなた自身とBotの両方に送信権限が必要です。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('📮 他chへ送信  channel_id:')
       .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
@@ -391,19 +392,19 @@ defineActionBlock('action_remove_role', COLOUR_ACTION, '対象ユーザーから
       .appendField('➖ ロール剥奪  role_id:')
       .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
 });
-defineActionBlock('action_set_nickname', COLOUR_ACTION, '対象ユーザーのニックネームを変更します（空欄でリセット）。', function() {
+defineActionBlock('action_set_nickname', COLOUR_ACTION, '対象ユーザーのニックネームを変更します（空欄でリセット）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('✏ ニックネーム変更')
       .appendField(new Blockly.FieldTextInput(''), 'NICKNAME');
 });
 
 /* ── チャンネル操作 ── */
-defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します（メッセージ受信/リアクショントリガーのみ有効）。', function() {
+defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します（メッセージ受信/リアクショントリガーのみ有効）。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('🧵 スレッド作成  名前:')
       .appendField(new Blockly.FieldTextInput('スレッド'), 'NAME');
 });
-defineActionBlock('action_set_channel_topic', COLOUR_ACTION, 'このチャンネルのトピックを変更します。', function() {
+defineActionBlock('action_set_channel_topic', COLOUR_ACTION, 'このチャンネルのトピックを変更します。' + TEMPLATE_HINT, function() {
   this.appendDummyInput()
       .appendField('📝 チャンネルトピック変更')
       .appendField(new Blockly.FieldTextInput(''), 'TOPIC');
@@ -455,9 +456,6 @@ defineActionBlock('action_ban', COLOUR_MOD, '対象ユーザーをサーバー�
 /* ── お楽しみ ── */
 defineActionBlock('action_rickroll', COLOUR_FUN, 'ランダムなリックロールGIFを送信します。', function() {
   this.appendDummyInput().appendField('🕺 リックロールを表示');
-});
-defineActionBlock('action_random_image', COLOUR_FUN, '/h コマンドと同じソースからランダム画像を送信します（NSFWチャンネル限定・条件に合わなければ何も起きません）。', function() {
-  this.appendDummyInput().appendField('🔞 /h の画像を表示（NSFWチャンネル限定）');
 });
 
 const toolbox = {
@@ -525,7 +523,6 @@ const toolbox = {
     { kind: 'category', name: 'お楽しみ', colour: COLOUR_FUN,
       contents: [
         { kind: 'block', type: 'action_rickroll' },
-        { kind: 'block', type: 'action_random_image' },
       ]},
   ]
 };
@@ -640,8 +637,6 @@ function actionBlockToJson(block) {
       return { type: 'ban' };
     case 'action_rickroll':
       return { type: 'rickroll' };
-    case 'action_random_image':
-      return { type: 'random_image' };
     default:
       return null;
   }
@@ -789,7 +784,6 @@ const ACTION_JSON_TO_BLOCK = {
   kick:          () => ({ type: 'action_kick', fields: {} }),
   ban:           () => ({ type: 'action_ban', fields: {} }),
   rickroll:      () => ({ type: 'action_rickroll', fields: {} }),
-  random_image:  () => ({ type: 'action_random_image', fields: {} }),
 };
 
 function actionJsonToBlock(action) {
