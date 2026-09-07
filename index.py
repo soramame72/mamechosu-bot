@@ -248,9 +248,8 @@ async def send_temp(channel, content=None, *, delete_after: float = 5, silent: b
 
 
 # ──────────────────────────────────────────────
-# GROQ ステータス更新 (1分ごと、100/1でえっち喘ぎ声)
+# ステータス更新（互換性維持用の空タスク）
 # ──────────────────────────────────────────────
-# えっちステータス（100分の1の確率で表示）
 # update_status は on_ready 内で直接設定するため loop 不要
 # (tasks.loop が残っているとインポートエラーになるので空関数で保持)
 @tasks.loop(hours=9999)
@@ -685,12 +684,19 @@ HELP_TEXT = {
         "- 読み込んだJSONは `trigger`（発動条件）と`actions`（実行内容）に従って自動実行されます\n"
         "- 使えるトリガー: メッセージ受信、メンバー参加/退出、リアクション追加、VC参加/退出\n"
         "- アクション数は最大20個、`delay`は最大1時間まで\n"
-        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与(単体/複数)/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、スローモード設定、タイムアウト/解除、キック、BAN、VC移動/切断/サーバーミュート/サーバースピーカーミュート、待機/ランダム待機、リックロール表示、ランダム画像表示（`/h`と同じ、NSFWチャンネル限定）、ランダムメッセージ送信\n"
+        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与(単体/複数)/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、スローモード設定、タイムアウト/解除、キック、BAN、VC移動/切断/サーバーミュート/サーバースピーカーミュート、待機/ランダム待機、リックロール表示、ランダムメッセージ送信\n"
         "- メンバー参加/退出・VC参加/退出トリガーは、メッセージが存在しないため実行先チャンネル（`channel_id`）の指定が必須です\n"
         "- BAN・キック・タイムアウト・ロール操作・ニックネーム変更・メッセージ削除/固定・スレッド作成・チャンネル編集・VC操作などの管理アクションは、**実行のたびに**アップロードした本人とBot自身が実際にその権限を持っているかを再チェックしてから実行します\n"
         "- 検証（必須項目・型・値の範囲）に通らないスクリプトは登録できません\n"
         "- サーバーあたり最大10個まで登録可能\n"
         "- 過去に作成した古いスクリプト（メッセージ受信トリガーのみの単純な構成）もそのままアップロード可能です\n"
+        "**テキスト系アクションで使える差し込み変数・関数的記法:**\n"
+        "- `{user}` `{user.name}` `{user.id}` `{user.tag}` : トリガー対象ユーザー\n"
+        "- `{server}` `{server.id}` `{member_count}` : サーバー情報\n"
+        "- `{channel}` `{channel.name}` : 実行先チャンネル\n"
+        "- `{mention:ユーザーID}` `{role:ロールID}` : 任意のユーザー/ロールを引数付きでメンション（実際にpingが飛びます）\n"
+        "- `{random:候補A|候補B|候補C}` : 「|」区切りの候補からランダムに1つ選択\n"
+        "- 対応アクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信/ランダムメッセージ送信/ニックネーム変更/スレッド作成/チャンネルトピック変更\n"
         "必要権限: サーバー管理権限"
     ),
     "scriptlist": (
@@ -763,15 +769,6 @@ HELP_TEXT = {
         "- 別サーバーのコードも利用可能（サーバークローン用途）\n"
         "必要権限: サーバー管理権限"
     ),
-    "lewd": (
-        "**えっち検出機能のON/OFFを設定します。**\n"
-        "使い方: `/lewd scope:[channel/server] state:[ON/OFF] channel:[チャンネル]`\n"
-        "**仕様:**\n"
-        "- 特定のえっちなワードを含むメッセージを検出し「ｴｯﾁﾅﾌﾗﾝﾁｬﾝ」が反応\n"
-        "- `scope:channel` で特定チャンネルのみ有効化\n"
-        "- `scope:server` でサーバー全体で有効化\n"
-        "必要権限: チャンネル管理権限"
-    ),
     "atsumori": (
         "**熱盛検知機能のON/OFFを設定します。**\n"
         "使い方: `/atsumori scope:[channel/server] state:[ON/OFF] channel:[チャンネル]`\n"
@@ -781,16 +778,6 @@ HELP_TEXT = {
         "- 0.5%の確率でランダム誤検知あり（謝罪メッセージ付き）\n"
         "- `scope:channel` / `scope:server` で有効範囲を選択\n"
         "必要権限: チャンネル管理権限"
-    ),
-    "h": (
-        "**えっちな画像をランダムで取得・表示します。**\n"
-        "使い方: `/h`\n"
-        "**仕様:**\n"
-        "- NSFWチャンネル限定（チャンネル設定で「年齢制限」ONが必要）\n"
-        "- 80%: yande.re からサンプル画像をDLしてファイル送信\n"
-        "- 20%: Rickroll GIF が表示される（リックロール）\n"
-        "- リックロール3連続でお祝いメッセージが表示（確率約0.8%）\n"
-        "- 取得失敗時は最大3回リトライ"
     ),
     "stats": (
         "**サーバーの活動統計を画像で表示します。**\n"
@@ -872,7 +859,7 @@ HELP_TEXT = {
         "**サーバー独自のGroq APIキーを設定します（管理者専用）。**\n"
         "使い方: `/apikey api_key:[Groq APIキー]`\n"
         "**仕様:**\n"
-        "- 設定すると、このサーバーのAI機能（川柳検出・えっち検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてがそのキーを使用します。AIチャット専用ではありません。\n"
+        "- 設定すると、このサーバーのAI機能（川柳検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてがそのキーを使用します。AIチャット専用ではありません。\n"
         "- 空で実行するとカスタムキーを削除してデフォルトに戻す\n"
         "- Groq APIキーは https://console.groq.com/ で無料発行可能\n"
         "必要権限: サーバー管理権限"
@@ -1627,7 +1614,7 @@ class _CPNavButton(discord.ui.Button):
             embed=self._view_ref._make_embed(), view=self._view_ref)
 
 class _ToggleButton(discord.ui.Button):
-    """えっち検出/川柳検出のON/OFFボタン"""
+    """川柳検出等、各種お楽しみ機能のON/OFFボタン"""
     def __init__(self, *, label, style, row, guild_id, feature, scope, on):
         super().__init__(label=label, style=style, row=row)
         self.guild_id = guild_id; self.feature = feature
@@ -1649,8 +1636,6 @@ class _ToggleButton(discord.ui.Button):
             feat_txt = "川柳検出"
         elif self.feature == "atsumori":
             feat_txt = "熱盛検知"
-        elif self.feature == "lewd":
-            feat_txt = "えっち検出"
         elif self.feature == "romaji":
             feat_txt = "ローマ字翻訳"
         elif self.feature == "impersonate":
@@ -1758,7 +1743,6 @@ class _BtnSettings(discord.ui.Button):
         wb = db_read("wordblock",guild_id=self.gid)
         ar = db_read("autoreply",guild_id=self.gid)
         hk = db_read("haiku",    guild_id=self.gid)
-        lw = db_read("lewd",     guild_id=self.gid)
         am = db_read("atsumori", guild_id=self.gid)
         wch = wd.get("channel"); fch = gd.get("channel")
         ai_chats = sum(1 for cid in getattr(bot, "_active_chats", {}) if i.guild.get_channel(cid))
@@ -1768,7 +1752,6 @@ class _BtnSettings(discord.ui.Button):
             f"禁止ワード: {len(wb.get('words',[]))}件 (適用ch: {len(wb.get('channels',[]))}件" + (" +全体)" if wb.get("server", True) else ")"),
             f"自動返信: {len(ar.get('replies',{}))}件 (適用ch: {len(ar.get('channels',[]))}件" + (" +全体)" if ar.get("server", True) else ")"),
             f"川柳検出ch: {len(hk.get('channels',[]))}件" + (" +全体" if hk.get("server") else ""),
-            f"えっち検出ch: {len(lw.get('channels',[]))}件" + (" +全体" if lw.get("server") else ""),
             f"熱盛検知ch: {len(am.get('channels',[]))}件" + (" +全体" if am.get("server") else ""),
             f"AI会話稼働ch: {ai_chats}件",
         ]
@@ -1974,7 +1957,7 @@ class _BtnCPHelp(discord.ui.Button):
             "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
             "**主な機能**:\n"
             "- **メッセージ・ワード管理**: 参加・退出メッセージ、禁止ワード、自動返信の設定\n"
-            "- **川柳 / えっち検出 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
+            "- **川柳 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
             "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
             "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
             "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
@@ -1987,13 +1970,12 @@ class CPView(discord.ui.View):
     PAGE_TITLES = [
         "メッセージ・ワード管理",
         "川柳 ON/OFF",
-        "えっち検出 ON/OFF",
         "熱盛検知 ON/OFF",
         "ローマ字翻訳 / なりすまし ON/OFF",
         "サーバー情報・バックアップ / パネル作成",
         "AIチャット ON/OFF",
     ]
-    MAX_PAGE = 6
+    MAX_PAGE = 5
 
     def __init__(self, guild_id: int, channel_id: int, page: int = 0):
         super().__init__(timeout=300)
@@ -2036,19 +2018,7 @@ class CPView(discord.ui.View):
                                             guild_id=gid, feature=feat, scope=scope, on=on))
 
         elif p == 2:
-            # ページ3: えっち検出 ON/OFF (このch / 全体)
-            specs = [
-                ("えっち ON  (このch)", "lewd", "channel", True,  discord.ButtonStyle.success, 0),
-                ("えっち OFF (このch)", "lewd", "channel", False, discord.ButtonStyle.danger,  0),
-                ("えっち ON  (全体)",   "lewd", "server",  True,  discord.ButtonStyle.success, 1),
-                ("えっち OFF (全体)",   "lewd", "server",  False, discord.ButtonStyle.danger,  1),
-            ]
-            for label, feat, scope, on, style, row in specs:
-                self.add_item(_ToggleButton(label=label, style=style, row=row,
-                                            guild_id=gid, feature=feat, scope=scope, on=on))
-
-        elif p == 3:
-            # ページ4: 熱盛検知 ON/OFF (このch / 全体)
+            # ページ3: 熱盛検知 ON/OFF (このch / 全体)
             specs = [
                 ("熱盛 ON  (このch)", "atsumori", "channel", True,  discord.ButtonStyle.success, 0),
                 ("熱盛 OFF (このch)", "atsumori", "channel", False, discord.ButtonStyle.danger,  0),
@@ -2059,8 +2029,8 @@ class CPView(discord.ui.View):
                 self.add_item(_ToggleButton(label=label, style=style, row=row,
                                             guild_id=gid, feature=feat, scope=scope, on=on))
 
-        elif p == 4:
-            # ページ5: ローマ字翻訳 / なりすまし / あけおめ ON/OFF
+        elif p == 3:
+            # ページ4: ローマ字翻訳 / なりすまし / あけおめ ON/OFF
             specs = [
                 ("ローマ字 ON  (このch)", "romaji", "channel", True,  discord.ButtonStyle.success, 0),
                 ("ローマ字 OFF (このch)", "romaji", "channel", False, discord.ButtonStyle.danger,  0),
@@ -2077,8 +2047,8 @@ class CPView(discord.ui.View):
             self.add_item(_BtnSetImpersonateChance(gid))
             self.add_item(_BtnImpersonateLog(gid))
 
-        elif p == 5:
-            # ページ6: サーバー情報・バックアップ / パネル作成
+        elif p == 4:
+            # ページ5: サーバー情報・バックアップ / パネル作成
             self.add_item(_BtnResource());         self.add_item(_BtnPermission())
             self.add_item(_BtnBackup(gid));        self.add_item(_BtnSettings(gid))
             ch = bot.get_channel(cid)
@@ -2090,8 +2060,8 @@ class CPView(discord.ui.View):
             if ch:
                 self.add_item(_BtnPurge(ch))
         
-        elif p == 6:
-            # ページ7: AIチャット ON/OFF
+        elif p == 5:
+            # ページ6: AIチャット ON/OFF
             self.add_item(_BtnStartAIChat(gid, cid))
             self.add_item(_BtnStopAIChat(gid, cid))
             self.add_item(_BtnSetAICustomKey(gid))
@@ -2122,7 +2092,7 @@ async def cmd_cp_help(interaction: discord.Interaction):
         "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
         "**主な機能**:\n"
         "- **メッセージ・ワード管理**: 参加・退出メッセージ、禁止ワード、自動返信の設定\n"
-        "- **川柳 / えっち検出 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
+        "- **川柳 / 熱盛検知**: 各種お遊び機能のON/OFF\n"
         "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
         "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
         "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
@@ -2729,7 +2699,7 @@ async def _process_fake_interaction(message):
     return True
 
 # ──────────────────────────────────────────────
-# on_message (禁止ワード / 自動返信 / 川柳 / えっち / グローバルチャット)
+# on_message (禁止ワード / 自動返信 / 川柳 / グローバルチャット)
 # ──────────────────────────────────────────────
 @bot.event
 async def on_message(message: discord.Message):
@@ -2805,10 +2775,7 @@ async def on_message(message: discord.Message):
             pass
 
     await bot.process_commands(message)
-    # DM受信時 → えっち語録をランダム返信
     if not message.guild:
-        if message.content.strip():
-            await message.channel.send(random.choice(LEWD_REPLIES))
         return
 
     # カスタムスクリプト（ビジュアルプログラミングJSON）のトリガー判定
@@ -2872,11 +2839,6 @@ async def on_message(message: discord.Message):
     am_data = db_read("atsumori", guild_id=message.guild.id)
     if am_data.get("server", True) or message.channel.id in am_data.get("channels", []):
         await check_atsumori(message)
-
-    # えっち検出
-    lw_data = db_read("lewd", guild_id=message.guild.id)
-    if lw_data.get("server") or message.channel.id in lw_data.get("channels", []):
-        await check_lewd(message)
 
     # グローバルチャット
     await relay_global_message(message)
@@ -2976,7 +2938,7 @@ CUSTOMSCRIPT_ACTION_TYPES    = {
     "create_thread", "set_channel_topic", "set_slowmode",
     "timeout", "remove_timeout", "kick", "ban",
     "move_voice_channel", "disconnect_voice", "set_voice_mute", "set_voice_deafen",
-    "rickroll", "random_image", "random_message",
+    "rickroll", "random_message",
 }
 # 管理系アクションの実行に必要な権限（アップロード者・Bot双方をチェック）
 CUSTOMSCRIPT_ACTION_PERMISSIONS = {
@@ -2991,7 +2953,7 @@ CUSTOMSCRIPT_ACTION_PERMISSIONS = {
     "move_voice_channel": "move_members", "disconnect_voice": "move_members",
     "set_voice_mute": "mute_members", "set_voice_deafen": "deafen_members",
 }
-# send_to_channel と random_image はチャンネル単位/NSFW判定の個別チェックが必要なため上の辞書には含めない
+# send_to_channel はチャンネル単位の個別権限チェックが必要なため上の辞書には含めない
 
 def validate_customscript(data) -> tuple[bool, str]:
     if not isinstance(data, dict):
@@ -3128,7 +3090,7 @@ def validate_customscript(data) -> tuple[bool, str]:
             if any(len(m) > 2000 for m in msgs):
                 return False, f"actions[{idx}].messages の各要素は2000文字以内である必要があります。"
         # remove_timeout / delete_message / remove_all_reactions / pin_message / unpin_message /
-        # kick / ban / rickroll / random_image / disconnect_voice は追加パラメータ不要
+        # kick / ban / rickroll / disconnect_voice は追加パラメータ不要
         # （kick/ban/timeout/voice系はトリガーの対象ユーザー、delete系/pin系はそのメッセージ自体が対象）
     return True, ""
 
@@ -3143,6 +3105,56 @@ def _customscript_condition_match(cond: dict | None, content: str) -> bool:
     if ctype == "startswith": return content.startswith(value)
     if ctype == "endswith": return content.endswith(value)
     return False
+
+_CUSTOMSCRIPT_TEMPLATE_FUNC = re.compile(r"\{(mention|role|random):([^{}]*)\}")
+
+def _render_customscript_template(text, message) -> str:
+    """送信テキスト内の差し込み変数・関数的記法を展開する。
+    - {user} / {user.name} / {user.id} / {user.tag} : トリガー対象ユーザー
+    - {server} / {server.id} / {member_count}       : サーバー情報
+    - {channel} / {channel.name}                    : 実行先チャンネル
+    - {mention:<ユーザーID>} / {role:<ロールID>}     : 任意のユーザー/ロールを引数付きでメンション（実際にpingが飛ぶ）
+    - {random:候補A|候補B|候補C}                     : 「|」区切りの候補からランダムに1つ選択
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    guild   = getattr(message, "guild", None)
+    channel = getattr(message, "channel", None)
+    member  = getattr(message, "author", None)
+
+    def _sub_func(m: re.Match) -> str:
+        key, arg = m.group(1), m.group(2)
+        try:
+            if key == "mention":
+                arg = arg.strip()
+                return f"<@{arg}>" if arg.isdigit() else m.group(0)
+            if key == "role":
+                arg = arg.strip()
+                return f"<@&{arg}>" if arg.isdigit() else m.group(0)
+            if key == "random":
+                options = [o for o in arg.split("|") if o != ""]
+                return random.choice(options) if options else ""
+        except Exception:
+            pass
+        return m.group(0)
+
+    text = _CUSTOMSCRIPT_TEMPLATE_FUNC.sub(_sub_func, text)
+
+    replacements = {
+        "{user}": member.mention if member else "",
+        "{user.name}": member.display_name if member else "",
+        "{user.id}": str(member.id) if member else "",
+        "{user.tag}": str(member) if member else "",
+        "{server}": guild.name if guild else "",
+        "{server.id}": str(guild.id) if guild else "",
+        "{member_count}": str(guild.member_count) if guild else "",
+        "{channel}": getattr(channel, "mention", "") or "",
+        "{channel.name}": getattr(channel, "name", "") or "",
+    }
+    for k, v in replacements.items():
+        if k in text:
+            text = text.replace(k, v)
+    return text
 
 async def _run_customscript_action(action: dict, message: discord.Message, uploader: discord.Member):
     t = action["type"]
@@ -3168,27 +3180,27 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
 
         # ── メッセージ系 ──
         elif t == "send_message":
-            await message.channel.send(action["content"][:2000])
+            await message.channel.send(_render_customscript_template(action["content"], message)[:2000])
         elif t == "reply":
-            await message.reply(action["content"][:2000])
+            await message.reply(_render_customscript_template(action["content"], message)[:2000])
         elif t == "send_embed":
             embed = discord.Embed()
-            if action.get("title"): embed.title = action["title"][:256]
-            if action.get("description"): embed.description = action["description"][:4000]
+            if action.get("title"): embed.title = _render_customscript_template(action["title"], message)[:256]
+            if action.get("description"): embed.description = _render_customscript_template(action["description"], message)[:4000]
             color = action.get("color")
             if color:
                 try: embed.colour = int(str(color).lstrip("#"), 16)
                 except Exception: pass
             await message.channel.send(embed=embed)
         elif t == "send_dm":
-            try: await message.author.send(action["content"][:2000])
+            try: await message.author.send(_render_customscript_template(action["content"], message)[:2000])
             except Exception: pass
         elif t == "send_to_channel":
             target = message.guild.get_channel(int(action["channel_id"]))
             if target:
                 # ギルド全体の権限ではなく、送信先チャンネル固有の権限で判定する
                 if target.permissions_for(uploader).send_messages and target.permissions_for(message.guild.me).send_messages:
-                    await target.send(action["content"][:2000])
+                    await target.send(_render_customscript_template(action["content"], message)[:2000])
                 else:
                     db_log("customscript_permission_denied", f"action=send_to_channel channel={action['channel_id']}", level="WARN")
         elif t == "add_reaction":
@@ -3217,7 +3229,8 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
                 await message.author.remove_roles(role, reason="カスタムスクリプトによる自動実行")
         elif t == "set_nickname":
             if message.author.top_role < message.guild.me.top_role:
-                await message.author.edit(nick=action.get("nickname") or None, reason="カスタムスクリプトによる自動実行")
+                nick = _render_customscript_template(action.get("nickname") or "", message)
+                await message.author.edit(nick=nick or None, reason="カスタムスクリプトによる自動実行")
         elif t == "timeout":
             sec = min(float(action.get("seconds", 0)), CUSTOMSCRIPT_MAX_TIMEOUT_SEC)
             if message.author.top_role < message.guild.me.top_role:
@@ -3249,9 +3262,10 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
 
         # ── チャンネル操作系 ──
         elif t == "create_thread":
-            await message.create_thread(name=action["name"][:100])
+            await message.create_thread(name=_render_customscript_template(action["name"], message)[:100])
         elif t == "set_channel_topic":
-            await message.channel.edit(topic=action.get("topic", "")[:1024], reason="カスタムスクリプトによる自動実行")
+            topic = _render_customscript_template(action.get("topic", ""), message)
+            await message.channel.edit(topic=topic[:1024], reason="カスタムスクリプトによる自動実行")
         elif t == "set_slowmode":
             sec = min(int(action.get("seconds", 0)), 21600)
             await message.channel.edit(slowmode_delay=max(0, sec), reason="カスタムスクリプトによる自動実行")
@@ -3260,7 +3274,7 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
         elif t == "random_message":
             msgs = action.get("messages", [])
             if msgs:
-                await message.channel.send(random.choice(msgs)[:2000])
+                await message.channel.send(_render_customscript_template(random.choice(msgs), message)[:2000])
         elif t == "rickroll":
             import io
             url = random.choice(RICK_GIFS)
@@ -3274,28 +3288,6 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
                             await message.channel.send(url)
             except Exception:
                 await message.channel.send(url)
-        elif t == "random_image":
-            # /h コマンドと同じ画像ソース。NSFWチャンネル以外では実行しない
-            if not (isinstance(message.channel, discord.TextChannel) and message.channel.nsfw):
-                db_log("customscript_nsfw_blocked", f"channel={message.channel.id}", level="WARN")
-                return
-            import io
-            async with aiohttp.ClientSession() as dl_session:
-                pool = await fetch_yande_pool(dl_session)
-                if not pool:
-                    return
-                random.shuffle(pool)
-                for url in pool[:3]:
-                    try:
-                        async with dl_session.get(url, headers={"User-Agent": "mamechosu-bot/1.0"},
-                                                   timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                            if resp.status != 200: continue
-                            raw = await resp.read()
-                        ext = url.rsplit(".", 1)[-1].lower() if "." in url else "jpg"
-                        await message.channel.send(file=discord.File(io.BytesIO(raw), filename=f"image.{ext}"))
-                        break
-                    except Exception:
-                        continue
     except Exception as e:
         db_log("customscript_action_failed", f"type={t} | {e}", level="WARN")
 
@@ -4696,365 +4688,12 @@ async def cmd_restore(interaction: discord.Interaction, code: str = None):
 
 
 # ──────────────────────────────────────────────
-# 14. えっち検出
-# ──────────────────────────────────────────────
-LEWD_KEYWORDS = [
-    "えっち","ecchi","ふたなり","おっぱい","まんこ","ちんこ","セックス","sex",
-    "抜いた","射精","オナ","エロ","ero","ぬいた","あんあん","おしり","パンツ",
-    "下着","ブラ","ちくび","乳首","フェラ","手マン","潮吹き","イった","イく",
-    "いかせて","おかず","興奮","ムラムラ","発情","やらしい","淫乱",
-]
-
-LEWD_REPLIES = [
-    "あっ…そこ…ふかく…いれないで…おなかがへん…になっちゃう…///",
-    "んぁっ…おまんこ…きもちよく…されたら…もうだめ…らめぇぇ…♡",
-    "はぁ…はぁ…なかで…どくどく…してる…わかる…？…きもちぃ…♡♡",
-    "や…やだっ…こんな…おくまで…とどいたら…いっちゃうぅ…///",
-    "くちゅくちゅ…っていってる…はずかしいから…きかないでぇ…",
-    "んっ…もうぬれぬれ…なの…はやくいれてほしくて…たまんない…♡",
-    "あっあっ…おねがい…もっとはやく…ぐりぐりして…おねがいっ…♡",
-    "ふぁ…クリトリス…そんな…ちゅーしたら…こわれちゃうぅ…///",
-    "ん…ちくびがびんびん…になってるの…みないでぇ…きもちぃから…",
-    "あぁ…おなか…ぽこぽこしてる…あなたのが…こんなに…おおきくて…♡",
-    "だめ…やだ…でも…いかせてぇ…もう…がまんできない…いかせてぇぇ…",
-    "んぁっ…ゆびで…なかを…かきまわしたら…だびょーって…でちゃうぅ…",
-    "もうぐちょぐちょ…なの…きいてる？…ここ…ずっとうごかしてて…♡",
-    "あっ…いっちゃう…ほんとに…いっちゃうから…とめないでぇぇ…",
-    "はぁ…やばい…しりを…たたかれるの…なんで…こんなにきもちぃの…///",
-    "んっ…おっぱい…もみながら…したいの？…変態…でもきもちぃ…♡",
-    "ふぁぁ…ぜんぶ…のみこんじゃった…おなかいっぱいぃ…よかった…♡",
-    "やだっ…いきなり…うしろも…さわらないで…ぁでも…きもちよかった…",
-    "あっ…ぜんぶ…きもちぃ…くりも…なかも…しりも…ぜんぶぅ…♡♡",
-    "んんっ…せーえき…いっぱいでてる…あったかくて…きもちぃ…♡",
-    "あぁ…おまんこが…ひくひくしてる…のわかる？…まだいけそう…",
-    "ふぁ…あんな…おっきいの…いれたのに…もっとほしいなんて…わたしへん？…///",
-    "んもぅ…ぜんぶしらない…きもちよすぎて…あたまがとける…らめ…♡",
-    "あっあっあっ…いく…いく…ほんとにいくぅぅ…とめないでぇぇ…",
-    "はぁ…はぁ…なかで…びゅーって…されたら…また…いっちゃった…♡",
-    "やっ…れろれろ…しながら…ゆびまで…いれないでぇ…きもちよすぎぃ…",
-    "んっ…ふとももに…こすりつけてるの…わかってるから…ちゃんといれてぇ…♡",
-    "ぁああ…しぼりとられてる…きもちぃ…もっとほしい…もっとぉ…♡♡",
-    "やだ…くちで…してほしいの…おまんこ…なめてほしいの…おねがい…",
-    "んあっ…いっしょに…いこ？…なかに…だしていいから…いっしょにぃ…♡",
-    # ── 記号・崩し・余白を活かした強化版語録 ─────────────
-    "ふぁっ…きもちぃよぉ…こんなの…しらなかった…まじで…やばいってぇ…///",
-    "あっ…おまんこ…ひろがってる…かんじする…もっとおしこんでぇ…♡",
-    "んっ…クリいじりながら…おくまでついたら…らめぇぇぇ…こわれる…///",
-    "はぁっ…ぬれすぎて…じゅぽじゅぽおとしてる…はずかしいぃ…でもきもちぃ…♡",
-    "あぁ…せなかからだかれながら…うごかれたら…なきそう…きもちぃ…♡♡",
-    "んぁ…ちくびをこりこりしながら…したでなめられたら…いきかけた…///",
-    "やぁっ…うしろにいれながら…クリもさわったら…もうだめぇぇ…♡",
-    "ふっ…ふっ…おなかのなかみちみちで…くるしい…でもきもちよすぎてぇ…",
-    "んんっ…はげしくうごかないで…おねがい…すぐいっちゃうから…でもきもちぃ…♡",
-    "あっ…あったかいなかに…いっぱいだしてくれたら…うれしいぃ…♡♡",
-    "ふぁ…クリをくちでチュッチュしながら…ゆびをいれないでぇ…いきすぎるぅ…///",
-    "んっ…のみこめてるかな…ちゃんとぜんぶのみこみたい…おいしいぃ…♡",
-    "あぁん…ぎゅってされながらうごかれると…こころもとけちゃいそう…♡♡♡",
-    "はぁっ…おまんこがほしくておねだりしてるの…わかる？…いれてぇ…///",
-    "んあっ…ゆっくりゆっくりやったらズルいよぉ…もっとはやくしてぇ…♡",
-    "ふぁっ…しおがでちゃう…でちゃう…とめられない…やばい…いっちゃうぅ…",
-    "あっ…えっちなかおしてるっていわないでぇ…じぶんでわかってるからぁ…///",
-    "んっ…うごくたびにくちゅくちゅおとがして…はずかしすぎてりかんする…",
-    "やっ…そんなにみつめながらしないでぇ…はずかしくていっちゃうぅ…///",
-    "ふぁ…とろとろになってきた…もうじぶんがわかんない…♡",
-    "んぁあ…おしりのあなもさわらないでぇ…そこまだだいじょうぶじゃないから…",
-    "あっあっ…はやすぎてついていけない…でもきもちぃからやめないで…♡",
-    "はぁ…せんせい…もっとおしえて…えっちなきもちよさを…もっとぉ…♡♡",
-    "んっ…なかがぎゅってしてるわかる？…はなしたくなくてぎゅってしてる…♡",
-    "ふぁぁ…なんかいでもいかせてほしいぃ…♡♡♡",
-    "あっ…おっぱいたぷたぷゆれてるのみてるんでしょ…変態…♡",
-    "んんっ…ふかいとことんとんされたら…なきながらいっちゃう…",
-    "ふぁ…おまんこのなかぜんぶみせてあげる…もっとみてぇ…///",
-    "あぁっ…くちでしごかれながらみあげたらめがあって…いきそう…♡",
-    "んあっ…こんなおとでちゃってる…なかがびしょびしょだから…///",
-    "はあっ…3かいめなのにまだきもちぃ…おかしくなってきた…♡",
-    "ふぁっ…うごくたびになかをかきまわされて…いまここいちばんきもちぃ…♡♡",
-    "んっ…おしっこもれそうじゃなくて…しおがでちゃいそうなの…",
-    "あっ…えっちなおとさせながらなかにいれてほしい…♡",
-    "んぁ…うしろからだきしめながらここをくりくりしたら…ずるいよぉ…♡",
-    "ふぁっ…んんっ…いきそういきそういきそう…とめないでぇぇ…",
-    "あっ…おへそのしたがじーんってしてる…もうすぐいけそう…♡",
-    "はぁ…いいこいいこってあたまなでながらしたら…だいすきになっちゃう…♡♡",
-    "んっ…ふかすぎておなかまでとどいてるきがする…こわれちゃう…でもきもちぃ…",
-    "あっあっ…んんっ…いくいくいくぅぅぅ…あぁぁぁぁぁっ…♡♡♡",
-    "やぁっ…せなかにしながらちくびをつねったら…ほんとにやばい…///",
-    "んっ…きもちよくてなみだでてきた…なんでこんなにきもちぃの…♡",
-    "ふぁぁ…なかにいっぱいだして…ぽたぽたたれてる…えっちだねわたし…///",
-    "あっ…またかたくなってる…まだするの？…うれしいぃ…♡",
-    "はぁっ…もうじゅんびできてるから…はやくいれてぇ…おねだりしてる…♡♡",
-    "んっ…きもちよすぎてことばがでない…ただただあっあっあっ…",
-    "ふぁ…おまんこだけじゃなくてくちもおしりも…ぜんぶつかっていいよ…♡",
-    "あぁ…もうぐちゃぐちゃなのにやめてくれない…もっとめちゃくちゃにして…",
-    "んっ…きょうなんかいいかせてくれるの…もうかぞえるきりょくもない…///",
-    "ふぁ…かれしでもないのに…こんなにいかされたら…すきになっちゃうよ…♡",
-    "あぁっ…みてて…わたしここがいちばんきもちぃから…ずっとここして…♡♡",
-    "んんんっ…さいごにいっぱいなかにだして…おわりにして…おねがい…♡",
-    # ── さらに追加・強化語録 ──────────────────────────────────
-    "あっ…ここ…きもちよすぎて…あしがたたない…もうたおれそう…///",
-    "んぁ…ずっとここで…うごかしてて…きもちよくてめがきえる…♡",
-    "ふぁっ…さすったら…すぐぬれちゃった…じぶんでもびっくり…///",
-    "はぁ…おなかのそこが…きゅんきゅんしてる…はやくちょうだい…♡♡",
-    "んっ…ぬれてるとこ…みないでぇ…でもみてほしいきもちもある…///",
-    "あぁ…ここに…すぽっていれたら…ぴったりはまる…きもちぃ…♡",
-    "やっ…ずっといったりきたり…されたら…なんかでてきた…やばい…",
-    "んんっ…にほんごわすれた…きもちよすぎて…あっあっしかいえない…///",
-    "ふぁっ…したから…くりくりされながら…ふかくつかれたら…らめらめ…♡",
-    "あっ…そこ…とくべつにきもちよいとこ…よくわかったね…すごい…♡♡",
-    "はぁっ…おしりをもちあげさせて…さらにおくまでいれないでぇ…こわれる…///",
-    "んぁっ…くちゅくちゅ…じゅぽじゅぽ…えっちなおとしかしてない…///",
-    "ふぁ…うごくたびに…ちくびがゆれて…じぶんでもきもちよくなってる…♡",
-    "あぁっ…さわられるまえから…もうびちょびちょだった…ごめんなさい…///",
-    "んっ…かおにかかったぁ…はずかしい…でもきもちよかったよ…♡",
-    "やぁ…なかでおっきくなるの…わかる…すごくきもちぃ…♡♡",
-    "ふぁっ…じぶんのこえが…えっちすぎて…こわくなってきた…でもとまれない…",
-    "あっ…きもちよくて…あしがぷるぷるしてる…もうたてない…///",
-    "んぁ…ゆびいれたまま…くりくりしたら…いちびょうでいった…♡",
-    "はぁ…おまんこが…すっごいひくひくしてる…まだほしいってしてる…♡♡",
-    "ふぁぁっ…はだかでだかれながら…キスしてほしい…すきなひとに…♡",
-    "んんっ…いったのに…まだうごかしてるの…きもちよすぎておかしくなる…",
-    "あっ…ちんちんのかたち…なかでかんじる…ここまでとどいてる…♡",
-    "やぁ…だいすきなひとにいかされたら…ないてしまった…きもちぃ…♡♡",
-    "ふぁ…ここをなめながら…ゆびをいれると…ちがうとこがいきそう…///",
-    "んぁっ…かれし…いやキミ…ちょっとまって…いきそうだから…ちょっとまって…♡",
-    "はぁっ…うえにのりながら…うんどうするの…はずかしいけどきもちぃ…///",
-    "あっ…こんなにぬれてるのに…まだいじわる…いれてくれないの…♡",
-    "んっ…ふとももをつかんで…はげしくされると…なかがきゅってする…♡♡",
-    "ふぁぁ…3かいいかせてくれたら…なんでもします…だからもっとして…///",
-    "やぁっ…うしろからあたまをおさえて…されると…ほんとにやばい…",
-    "あぁ…ひとさしゆびと…なかゆびで…いっぺんにいれないでぇ…ひろがっちゃう…",
-    "んんっ…せなかをなでながら…されると…なんかかなしくなってなける…きもちぃから…♡",
-    "ふぁっ…いちどにいっぱいきもちよくなると…あたまがまっしろになる…///",
-    "あっ…くちと…なかと…ゆびで…さんかしょいっぺんにされたら…もう…あぁ…♡♡",
-    "んぁ…おしりのあな…ゆっくりほぐされてきた…こわいけどきもちぃ…",
-    "はぁ…ずっとキスしながら…うごいてほしい…かおをみてほしい…♡",
-    "ふぁっ…なかにはいってるの…わかる？…すごくきもちいいの…♡♡",
-    "あぁっ…おかあさんになれるとこ…つっついたら…らめぇぇぇぇ…///",
-    "んっ…えっちなことしながら…すきってきかれたら…こたえられない…♡",
-    "やぁ…もうじぶんがだれかわかんない…きもちよすぎて…とけてる…♡",
-    "ふぁぁ…ちゅっちゅしながら…したで…ころころされたら…いった…♡♡",
-    "あっ…きょうはなんかいいかせてくれるの？…もうかぞえてない…///",
-    "んんっ…このまま…あさになるまで…してほしい…♡",
-    "はぁ…ぎゅってだきながら…なかにだしてくれたら…うれしくてなく…♡♡",
-    "ふぁっ…もうここ…キミのかたちになってるかも…きもちぃ…♡",
-    "あぁ…えっちなことしてる…わたし…でも…やめたくない…///",
-    "んっ…いっぱいいかせてくれて…ありがとう…だいすき…♡♡♡",
-    "ふぁぁぁ…らめぇ…もうらめぇ…でも…やめないでぇぇぇ…",
-    "あっあっあっあぁっ…いっちゃう…いっちゃう…いくぅぅぅぅっ！！♡♡♡",
-    # ── 記号テクニック全盛り・新語録 ──────────────────────────
-    "ん…///…ここ…さわられるだけで…もうとろとろ…きもちぃ…♡",
-    "あっ♡…やだっ♡…でもっ♡…やめないでっ♡…おねがいっ…♡♡",
-    "はぁ…///…きもちよすぎて…わたし…おかしくなってるかも…///",
-    "んっ…すき…すき…こんなにきもちよくして…すきになっちゃうじゃん…♡♡",
-    "ふぁっ…ぁっ…んっ…もうことばにならない…あっあっあっ…///♡",
-    "あぁ…まって…まって…いきそうだから…まってっ…♡///♡",
-    "んぁ…ここ…ここっ…ずっとここ…はなれないで…♡…おねがい…♡",
-    "はぁ♡…もっと…もっとぉ…もっとしてぇ…♡♡♡…たりないよぉ…",
-    "ふぁ…///…みないでぇ…でも…みてほしい…♡…へんなの…わたし…///",
-    "あっ…なかでぴくぴくしてる…わかる？…きもちよくてとまれない…♡",
-    "んっ…こんなにぬらして…どうするの…♡…もうぐちゃぐちゃだよ…///",
-    "やっ…ぁやっ…らめっ…らめぇ…でもきもちぃから…やめたくない…♡♡",
-    "ふぁっ…キスしながら…ゆびいれないでぇ…あたまがとんじゃう…♡",
-    "はぁ…もうなきそう…きもちよすぎて…うれしくてなきそう…♡♡",
-    "んぁっ…すきすきすき…こんなきもちよくするひと…すきになっちゃうよ…♡♡♡",
-]
-
-async def _groq_check_lewd(text: str, guild_id: int = None) -> bool:
-    api_key = get_groq_api_key(guild_id)
-    if not api_key:
-        return any(kw.lower() in text.lower() for kw in LEWD_KEYWORDS)
-    try:
-        prompt = (
-            "あなたはDiscordサーバーの不適切な発言を監視するモデレーターです。\n"
-            "次のメッセージが猥褻な表現を含むか判定してください。\n\n"
-            f"メッセージ: 「{text}」\n\n"
-            "「はい」にする条件（すべて当てはまる場合のみ）:\n"
-            "- 読んだ誰もが見ても性的・猥褻とすぐわかる明白な表現である\n"
-            "- 性的行為の描写、卑猥な隠語の性的使用、喘ぎ声など\n\n"
-            "「いいえ」にする条件:\n"
-            "- 曖昧・比喩・ジョーク・誤変換・日常語の偶然の一致\n"
-            "- 少しでも迷いがある場合は必ず「いいえ」\n\n"
-            "判定結果として「はい」または「いいえ」とだけ答えてください。"
-        )
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}",
-                         "Content-Type": "application/json"},
-                json={
-                    "model": "openai/gpt-oss-120b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 10,
-                    "temperature": 0.1,
-                },
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    res = data["choices"][0]["message"]["content"].strip()
-                    return "はい" in res
-    except Exception:
-        pass
-    return any(kw.lower() in text.lower() for kw in LEWD_KEYWORDS)
-
-async def check_lewd(message: discord.Message):
-    text = message.content.strip()
-    if not text:
-        return
-    is_lewd = await _groq_check_lewd(text)
-    if is_lewd:
-        reply_text = random.choice(LEWD_REPLIES)
-        # h_flan.png をアイコンにしたWebhookで送信
-        try:
-            hooks = await message.channel.webhooks()
-            wh = next((h for h in hooks if h.name == "ｴｯﾁﾅﾌﾗﾝﾁｬﾝ"), None)
-            if wh is None:
-                # アイコン画像を読み込んでWebhookを作成
-                img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img", "h_flan.png")
-                if os.path.exists(img_path):
-                    with open(img_path, "rb") as f:
-                        avatar = f.read()
-                    wh = await message.channel.create_webhook(name="ｴｯﾁﾅﾌﾗﾝﾁｬﾝ", avatar=avatar)
-                else:
-                    wh = await message.channel.create_webhook(name="ｴｯﾁﾅﾌﾗﾝﾁｬﾝ")
-            await wh.send(reply_text, username="ｴｯﾁﾅﾌﾗﾝﾁｬﾝ")
-        except Exception:
-            # Webhookが使えない場合は通常返信にフォールバック
-            await message.channel.send(reply_text)
-
-@bot.tree.command(name="lewd", description="えっち検出機能のON/OFFを切り替えます")
-@app_commands.describe(scope="channel=このチャンネルのみ / server=サーバー全体", state="ON / OFF", channel="対象チャンネル（省略=実行チャンネル）")
-async def cmd_lewd(interaction: discord.Interaction, scope: str = "channel", state: str = "ON", channel: discord.TextChannel = None):
-    await safe_defer(interaction, ephemeral=True)
-    if not interaction.user.guild_permissions.manage_channels:
-        await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
-        return
-    gd = db_read("lewd", guild_id=interaction.guild_id)
-    on = state.upper() == "ON"
-    if scope == "server":
-        gd["server"] = on
-        msg = f"サーバー全体のえっち検出を {'ON' if on else 'OFF'} にしました。"
-    else:
-        target = channel or interaction.channel
-        chs = gd.get("channels", [])
-        if on and target.id not in chs:
-            chs.append(target.id)
-        elif not on and target.id in chs:
-            chs.remove(target.id)
-        gd["channels"] = chs
-        msg = f"{target.mention} のえっち検出を {'ON' if on else 'OFF'} にしました。"
-    db_write("lewd", gd, guild_id=interaction.guild_id)
-    await interaction.followup.send(msg, ephemeral=True)
-
-# ──────────────────────────────────────────────
-# 15. 画像取得 /h (NSFWチャンネル限定)
+# リックロール用GIF（customscriptのrickrollアクション等で使用）
 # ──────────────────────────────────────────────
 RICK_GIFS = [
     "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick.gif",
     "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick1.gif",
 ]
-# グロ・残虐系タグ除外リスト
-_GURO_TAGS = [
-    "guro", "gore", "blood", "amputee", "ryona", "vore",
-    "scat", "torture", "death", "decapitation", "wound",
-    "bruise", "injury", "cannibal",
-]
-
-async def fetch_yande_pool(session: aiohttp.ClientSession) -> list:
-    """
-    yande.re からランダムなNSFW画像をプールして返す。
-    sample_url（プレビューサイズ）を優先取得。グロ系は除外。
-    """
-    urls = []
-    seen = set()
-    attempts = 0
-    while len(urls) < 20 and attempts < 6:
-        attempts += 1
-        page = random.randint(1, 200)
-        api_url = f"https://yande.re/post.json?tags=rating%3Aexplicit&limit=40&page={page}"
-        try:
-            async with session.get(
-                api_url,
-                headers={"User-Agent": "mamechosu-bot/1.0"},
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as resp:
-                if resp.status != 200:
-                    continue
-                posts = await resp.json()
-                if not isinstance(posts, list):
-                    continue
-                for p in posts:
-                    tag_str = p.get("tags", "").lower()
-                    if any(g in tag_str for g in _GURO_TAGS):
-                        continue
-                    # sample_url (プレビュー) を優先、なければ file_url
-                    su = p.get("sample_url") or p.get("file_url", "")
-                    ext = su.rsplit(".", 1)[-1].lower() if su else ""
-                    if su and ext in ("jpg", "jpeg", "png", "gif", "webp") and su not in seen:
-                        urls.append(su)
-                        seen.add(su)
-        except Exception:
-            continue
-    return urls
-
-_rick_streaks = {}
-
-@bot.tree.command(name="h", description="えっちな画像をランダムで取得します")
-@app_commands.guild_only()
-async def cmd_h(interaction: discord.Interaction):
-    ch = interaction.channel
-    if not (isinstance(ch, discord.TextChannel) and ch.nsfw):
-        await interaction.response.send_message("このコマンドはNSFW（年齢制限）チャンネルでのみ使用できます。", ephemeral=True)
-        return
-    await safe_defer(interaction)
-    user_id = interaction.user.id
-    if random.random() < 0.8:
-        _rick_streaks[user_id] = 0
-        async with aiohttp.ClientSession() as dl_session:
-            pool = await fetch_yande_pool(dl_session)
-            if not pool:
-                await interaction.followup.send("画像の取得に失敗しました。")
-                return
-            # 最大3回リトライ
-            random.shuffle(pool)
-            sent = False
-            for url in pool[:3]:
-                try:
-                    async with dl_session.get(
-                        url,
-                        headers={"User-Agent": "mamechosu-bot/1.0"},
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        raw = await resp.read()
-                    ext = url.rsplit(".", 1)[-1].lower() if "." in url else "jpg"
-                    fname = f"image.{ext}"
-                    import io as _io
-                    await interaction.followup.send(file=discord.File(_io.BytesIO(raw), filename=fname))
-                    sent = True
-                    break
-                except Exception:
-                    continue
-            if not sent:
-                await interaction.followup.send("画像の取得に失敗しました。")
-    else:
-        _rick_streaks[user_id] = _rick_streaks.get(user_id, 0) + 1
-        rick_url = random.choice(RICK_GIFS)
-        try:
-            async with aiohttp.ClientSession() as rs:
-                async with rs.get(rick_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        raw = await resp.read()
-                        import io as _io
-                        await interaction.followup.send(file=discord.File(_io.BytesIO(raw), filename="rick.gif"))
-                    else:
-                        await interaction.followup.send(rick_url)
-        except Exception:
-            await interaction.followup.send(rick_url)
-        
-        if _rick_streaks[user_id] >= 3:
-            await interaction.channel.send(f"**なんと！！**\n{interaction.user.mention} さんが **3回連続でRickrollを引き当てました！** \nおめでとうございます！")
-            _rick_streaks[user_id] = 0
 
 
 # ──────────────────────────────────────────────
@@ -6654,7 +6293,7 @@ async def cmd_secret(interaction: discord.Interaction):
 
     event = random.choice([
         "timeout", "confess", "meigen", "senryu",
-        "rickroll", "obama", "nick", "lewd",
+        "rickroll", "obama", "nick",
     ])
 
     try:
@@ -6746,13 +6385,6 @@ async def cmd_secret(interaction: discord.Interaction):
             data[uid_str] = {"original": original, "revert_at": time.time() + 3600}
             db_write("secret_nick", data, guild_id=guild.id)
             await channel.send(f"{member.mention} のニックネームが1時間だけ変わりました…！")
-
-        elif event == "lewd":
-            member = _secret_random_member(guild)
-            if not member:
-                await interaction.followup.send("対象ユーザーが見つかりませんでした。", ephemeral=True); return
-            text = random.choice(LEWD_REPLIES)
-            await _secret_impersonate(channel, member, text)
 
         await interaction.followup.send(f"実行しました。(発生した現象: {event})", ephemeral=True)
         db_log("secret_command", f"guild={guild.id} executor={interaction.user.id} event={event}")
@@ -6965,7 +6597,7 @@ async def _chat_loop(channel_id: int):
         wait_seconds = random.uniform(interval_min * 60.0, interval_max * 60.0)
         await asyncio.sleep(wait_seconds)
 
-@bot.tree.command(name="apikey", description="サーバー独自のGroq APIキーを設定します（管理者専用・川柳/えっち検出/AIチャット等すべてのAI機能に適用されます）")
+@bot.tree.command(name="apikey", description="サーバー独自のGroq APIキーを設定します（管理者専用・川柳/AIチャット等すべてのAI機能に適用されます）")
 @app_commands.describe(api_key="設定するGroq APIキー（空の場合は削除）")
 @app_commands.default_permissions(manage_guild=True)
 async def cmd_apikey(interaction: discord.Interaction, api_key: str = None):
@@ -6981,7 +6613,7 @@ async def cmd_apikey(interaction: discord.Interaction, api_key: str = None):
     if api_key:
         settings["custom_api_key"] = api_key
         db_write("aichat_settings", settings, guild_id=gid)
-        await interaction.followup.send("サーバー独自のAPIキーを保存しました。このサーバーのAI機能（川柳検出・えっち検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてに適用されます。", ephemeral=True)
+        await interaction.followup.send("サーバー独自のAPIキーを保存しました。このサーバーのAI機能（川柳検出・熱盛検知・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてに適用されます。", ephemeral=True)
     else:
         if "custom_api_key" in settings:
             del settings["custom_api_key"]
