@@ -188,15 +188,16 @@ const COLOUR_FUN     = '#EC4899';
 Blockly.Blocks['trigger_on_message'] = {
   init: function() {
     this.appendDummyInput().appendField('⚡ メッセージを受信したとき');
-    this.appendValueInput('CHANNEL_ID').setCheck(null)
-        .appendField('  対象チャンネルID(任意)');
     this.appendDummyInput()
-        .appendField('  条件')
+        .appendField('  対象チャンネルID（空欄でOK・全チャンネル対象）')
+        .appendField(new Blockly.FieldTextInput(''), 'CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  発動条件')
         .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
         .appendField(new Blockly.FieldTextInput(''), 'COND_VALUE');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
-    this.setTooltip('メッセージを受信した時に発動します。チャンネルIDと条件を空にすると全チャンネル・無条件で反応します。');
+    this.setTooltip('メッセージを受信した時に発動します。チャンネルIDと条件を空欄のままにすると、全チャンネル・無条件で反応します。');
   }
 };
 
@@ -206,7 +207,7 @@ Blockly.Blocks['trigger_on_member_join'] = {
     this.appendDummyInput()
         .appendField('  実行先チャンネルID')
         .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
     this.setTooltip('新しいメンバーがサーバーに参加した時に発動します。メッセージが存在しないため実行先チャンネルの指定が必須です。');
   }
@@ -218,7 +219,7 @@ Blockly.Blocks['trigger_on_member_leave'] = {
     this.appendDummyInput()
         .appendField('  実行先チャンネルID')
         .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
     this.setTooltip('メンバーがサーバーから退出した時に発動します。実行先チャンネルの指定が必須です。');
   }
@@ -227,15 +228,16 @@ Blockly.Blocks['trigger_on_member_leave'] = {
 Blockly.Blocks['trigger_on_reaction_add'] = {
   init: function() {
     this.appendDummyInput().appendField('😀 リアクションが付いたとき');
-    this.appendValueInput('CHANNEL_ID').setCheck(null)
-        .appendField('  対象チャンネルID(任意)');
+    this.appendDummyInput()
+        .appendField('  対象チャンネルID（空欄でOK・全チャンネル対象）')
+        .appendField(new Blockly.FieldTextInput(''), 'CHANNEL_ID');
     this.appendDummyInput()
         .appendField('  絵文字条件')
         .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
         .appendField(new Blockly.FieldTextInput('👍'), 'COND_VALUE');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
-    this.setTooltip('メッセージにリアクションが付いた時に発動します。絵文字条件は「完全一致」で特定の絵文字だけに絞り込めます。');
+    this.setTooltip('メッセージにリアクションが付いた時に発動します。絵文字条件を「完全一致」にすると特定の絵文字だけに絞り込めます。');
   }
 };
 
@@ -248,7 +250,7 @@ Blockly.Blocks['trigger_on_voice_join'] = {
     this.appendDummyInput()
         .appendField('  実行先チャンネルID')
         .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
     this.setTooltip('メンバーがボイスチャンネルに参加した時に発動します。VCのIDを指定すると特定のVCのみに絞り込めます。');
   }
@@ -263,18 +265,9 @@ Blockly.Blocks['trigger_on_voice_leave'] = {
     this.appendDummyInput()
         .appendField('  実行先チャンネルID')
         .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
-    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ 実行するアクション');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
     this.setColour(COLOUR_TRIGGER);
     this.setTooltip('メンバーがボイスチャンネルから退出した時に発動します。');
-  }
-};
-
-Blockly.Blocks['value_channel_id'] = {
-  init: function() {
-    this.appendDummyInput().appendField(new Blockly.FieldTextInput(''), 'ID');
-    this.setOutput(true, null);
-    this.setColour(COLOUR_TRIGGER);
-    this.setTooltip('チャンネルIDを数字で入力（空欄=絞り込みなし）。');
   }
 };
 
@@ -457,6 +450,28 @@ defineActionBlock('action_ban', COLOUR_MOD, '対象ユーザーをサーバー�
 defineActionBlock('action_rickroll', COLOUR_FUN, 'ランダムなリックロールGIFを送信します。', function() {
   this.appendDummyInput().appendField('🕺 リックロールを表示');
 });
+defineActionBlock('action_countdown', COLOUR_FUN, '「3… 2… 1…」のようにカウントダウンしてから、任意で最後のメッセージを送信します（1メッセージ=1秒間隔）。', function() {
+  this.appendDummyInput()
+      .appendField('⏳ カウントダウン')
+      .appendField(new Blockly.FieldNumber(3, 1, 10, 1), 'FROM')
+      .appendField('から0まで');
+  this.appendDummyInput()
+      .appendField('  最後に送るメッセージ(任意)')
+      .appendField(new Blockly.FieldTextInput('🎉 スタート！'), 'FINAL_MESSAGE');
+});
+defineActionBlock('action_random_reaction', COLOUR_FUN, '😂🎉🔥など、お楽しみ絵文字プールからランダムに1つ選んでリアクションします。', function() {
+  this.appendDummyInput().appendField('🎁 サプライズリアクション（ランダム絵文字）');
+});
+defineActionBlock('action_coin_flip', COLOUR_FUN, 'コイントスの結果（表/裏）をランダムに送信します。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🪙 コイントス')
+      .appendField(new Blockly.FieldTextInput('🪙 コイントスの結果… **{random:表|裏}**！'), 'CONTENT');
+});
+defineActionBlock('action_dice_roll', COLOUR_FUN, '{dice:面数} の面数部分を書き換えるだけで何面のサイコロにも変更できます。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🎲 サイコロを振る')
+      .appendField(new Blockly.FieldTextInput('🎲 サイコロの結果… **{dice:6}**！'), 'CONTENT');
+});
 
 const toolbox = {
   kind: 'categoryToolbox',
@@ -469,7 +484,6 @@ const toolbox = {
         { kind: 'block', type: 'trigger_on_reaction_add' },
         { kind: 'block', type: 'trigger_on_voice_join' },
         { kind: 'block', type: 'trigger_on_voice_leave' },
-        { kind: 'block', type: 'value_channel_id' },
       ]},
     { kind: 'category', name: '待機', colour: COLOUR_ACTION,
       contents: [
@@ -523,6 +537,10 @@ const toolbox = {
     { kind: 'category', name: 'お楽しみ', colour: COLOUR_FUN,
       contents: [
         { kind: 'block', type: 'action_rickroll' },
+        { kind: 'block', type: 'action_countdown' },
+        { kind: 'block', type: 'action_random_reaction' },
+        { kind: 'block', type: 'action_coin_flip' },
+        { kind: 'block', type: 'action_dice_roll' },
       ]},
   ]
 };
@@ -637,6 +655,14 @@ function actionBlockToJson(block) {
       return { type: 'ban' };
     case 'action_rickroll':
       return { type: 'rickroll' };
+    case 'action_countdown':
+      return { type: 'countdown', from: Number(block.getFieldValue('FROM')), final_message: block.getFieldValue('FINAL_MESSAGE') };
+    case 'action_random_reaction':
+      return { type: 'random_reaction' };
+    case 'action_coin_flip':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
+    case 'action_dice_roll':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
     default:
       return null;
   }
@@ -648,13 +674,8 @@ function triggerBlockToJson(trigger) {
       const condType = trigger.getFieldValue('COND_TYPE');
       const condValue = trigger.getFieldValue('COND_VALUE');
       const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
-      let channelId = null;
-      const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
-      if (chBlock && chBlock.type === 'value_channel_id') {
-        const raw = (chBlock.getFieldValue('ID') || '').trim();
-        if (raw) channelId = raw;
-      }
-      return { type: 'on_message', channel_id: channelId, condition: condition };
+      const raw = (trigger.getFieldValue('CHANNEL_ID') || '').trim();
+      return { type: 'on_message', channel_id: raw || null, condition: condition };
     }
     case 'trigger_on_member_join':
       return { type: 'on_member_join', channel_id: trigger.getFieldValue('CHANNEL_ID').trim() };
@@ -664,13 +685,8 @@ function triggerBlockToJson(trigger) {
       const condType = trigger.getFieldValue('COND_TYPE');
       const condValue = trigger.getFieldValue('COND_VALUE');
       const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
-      let channelId = null;
-      const chBlock = trigger.getInputTargetBlock('CHANNEL_ID');
-      if (chBlock && chBlock.type === 'value_channel_id') {
-        const raw = (chBlock.getFieldValue('ID') || '').trim();
-        if (raw) channelId = raw;
-      }
-      return { type: 'on_reaction_add', channel_id: channelId, condition: condition };
+      const raw = (trigger.getFieldValue('CHANNEL_ID') || '').trim();
+      return { type: 'on_reaction_add', channel_id: raw || null, condition: condition };
     }
     case 'trigger_on_voice_join':
     case 'trigger_on_voice_leave': {
@@ -784,6 +800,8 @@ const ACTION_JSON_TO_BLOCK = {
   kick:          () => ({ type: 'action_kick', fields: {} }),
   ban:           () => ({ type: 'action_ban', fields: {} }),
   rickroll:      () => ({ type: 'action_rickroll', fields: {} }),
+  countdown:     (a) => ({ type: 'action_countdown', fields: { FROM: a.from ?? 3, FINAL_MESSAGE: a.final_message ?? '' } }),
+  random_reaction: () => ({ type: 'action_random_reaction', fields: {} }),
 };
 
 function actionJsonToBlock(action) {
@@ -826,13 +844,7 @@ function buildTriggerBlock(trigger) {
   const cond = trigger.condition || { type: 'any' };
   block.setFieldValue(cond.type || 'any', 'COND_TYPE');
   if (cond.value) block.setFieldValue(String(cond.value), 'COND_VALUE');
-
-  if (trigger.channel_id) {
-    const chBlock = workspace.newBlock('value_channel_id');
-    chBlock.initSvg(); chBlock.render();
-    chBlock.setFieldValue(String(trigger.channel_id), 'ID');
-    block.getInput('CHANNEL_ID').connection.connect(chBlock.outputConnection);
-  }
+  if (trigger.channel_id) block.setFieldValue(String(trigger.channel_id), 'CHANNEL_ID');
   return block;
 }
 
