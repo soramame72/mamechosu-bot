@@ -679,12 +679,12 @@ HELP_TEXT = {
         "**カスタムスクリプト(.json)をアップロードして登録します。**\n"
         "使い方: `/uploadscript file:[.jsonファイル]`\n"
         "**スクリプトの作り方:**\n"
-        "- <http://mamechosu.cloudfree.jp/dc/mb/sb.html> のWeb GUI（Blockly）でブロックを組み立てて「スクリプトをダウンロード」するだけで .json ファイルが作成できます\n"
+        "- <http://mamechosu.cloudfree.jp/dc/mb/sb.html> でブロックを組み立てて「スクリプトをダウンロード」するだけで .json ファイルが作成できます\n"
         "**仕様:**\n"
         "- 読み込んだJSONは `trigger`（発動条件）と`actions`（実行内容）に従って自動実行されます\n"
         "- 使えるトリガー: メッセージ受信、メンバー参加/退出、リアクション追加、VC参加/退出\n"
         "- アクション数は最大20個、`delay`は最大1時間まで\n"
-        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与(単体/複数)/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、スローモード設定、タイムアウト/解除、キック、BAN、VC移動/切断/サーバーミュート/サーバースピーカーミュート、待機/ランダム待機、リックロール表示、ランダムメッセージ送信\n"
+        "- 使えるアクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信、リアクション付与(単体/複数/ランダム)/全削除、メッセージ削除/固定/固定解除、ロール付与/剥奪、ニックネーム変更、スレッド作成、チャンネルトピック変更、スローモード設定、タイムアウト/解除、キック、BAN、VC移動/切断/サーバーミュート/サーバースピーカーミュート、待機/ランダム待機、リックロール表示、ランダムメッセージ送信、カウントダウン送信\n"
         "- メンバー参加/退出・VC参加/退出トリガーは、メッセージが存在しないため実行先チャンネル（`channel_id`）の指定が必須です\n"
         "- BAN・キック・タイムアウト・ロール操作・ニックネーム変更・メッセージ削除/固定・スレッド作成・チャンネル編集・VC操作などの管理アクションは、**実行のたびに**アップロードした本人とBot自身が実際にその権限を持っているかを再チェックしてから実行します\n"
         "- 検証（必須項目・型・値の範囲）に通らないスクリプトは登録できません\n"
@@ -696,6 +696,7 @@ HELP_TEXT = {
         "- `{channel}` `{channel.name}` : 実行先チャンネル\n"
         "- `{mention:ユーザーID}` `{role:ロールID}` : 任意のユーザー/ロールを引数付きでメンション（実際にpingが飛びます）\n"
         "- `{random:候補A|候補B|候補C}` : 「|」区切りの候補からランダムに1つ選択\n"
+        "- `{dice:面数}` : 1〜面数のランダムな整数（サイコロ）\n"
         "- 対応アクション: メッセージ送信/返信/Embed送信/DM送信/他チャンネルへ送信/ランダムメッセージ送信/ニックネーム変更/スレッド作成/チャンネルトピック変更\n"
         "必要権限: サーバー管理権限"
     ),
@@ -738,6 +739,7 @@ HELP_TEXT = {
         "**表示内容:**\n"
         "- CPU使用率 / メモリ使用率（使用量/総量）\n"
         "- ストレージ使用率\n"
+        "- Botアップタイム（プロセス起動からの経過時間） / CPU UPTIME（サーバー本体起動からの経過時間）\n"
         "- Groq API残りリクエスト数・トークン数\n"
         "- index.py 最終更新日時\n"
         "- Bot稼働サーバー数"
@@ -2932,13 +2934,13 @@ CUSTOMSCRIPT_CONDITION_TYPES = {"any", "equals", "contains", "startswith", "ends
 CUSTOMSCRIPT_ACTION_TYPES    = {
     "delay", "random_delay",
     "send_message", "reply", "send_embed", "send_dm", "send_to_channel",
-    "add_reaction", "remove_all_reactions", "add_multiple_reactions",
+    "add_reaction", "remove_all_reactions", "add_multiple_reactions", "random_reaction",
     "delete_message", "pin_message", "unpin_message",
     "add_role", "remove_role", "set_nickname",
     "create_thread", "set_channel_topic", "set_slowmode",
     "timeout", "remove_timeout", "kick", "ban",
     "move_voice_channel", "disconnect_voice", "set_voice_mute", "set_voice_deafen",
-    "rickroll", "random_message",
+    "rickroll", "random_message", "countdown",
 }
 # 管理系アクションの実行に必要な権限（アップロード者・Bot双方をチェック）
 CUSTOMSCRIPT_ACTION_PERMISSIONS = {
@@ -3089,8 +3091,17 @@ def validate_customscript(data) -> tuple[bool, str]:
                 return False, f"actions[{idx}].messages は1〜10個の空でない文字列を含む配列である必要があります。"
             if any(len(m) > 2000 for m in msgs):
                 return False, f"actions[{idx}].messages の各要素は2000文字以内である必要があります。"
+        elif t == "countdown":
+            frm = act.get("from", 3)
+            if not isinstance(frm, (int, float)) or isinstance(frm, bool) or not (1 <= frm <= 10):
+                return False, f"actions[{idx}].from は1〜10の数値である必要があります。"
+            final_msg = act.get("final_message", "")
+            if not isinstance(final_msg, str):
+                return False, f"actions[{idx}].final_message は文字列である必要があります。"
+            if len(final_msg) > 2000:
+                return False, f"actions[{idx}].final_message は2000文字以内である必要があります。"
         # remove_timeout / delete_message / remove_all_reactions / pin_message / unpin_message /
-        # kick / ban / rickroll / disconnect_voice は追加パラメータ不要
+        # kick / ban / rickroll / disconnect_voice / random_reaction は追加パラメータ不要
         # （kick/ban/timeout/voice系はトリガーの対象ユーザー、delete系/pin系はそのメッセージ自体が対象）
     return True, ""
 
@@ -3106,7 +3117,7 @@ def _customscript_condition_match(cond: dict | None, content: str) -> bool:
     if ctype == "endswith": return content.endswith(value)
     return False
 
-_CUSTOMSCRIPT_TEMPLATE_FUNC = re.compile(r"\{(mention|role|random):([^{}]*)\}")
+_CUSTOMSCRIPT_TEMPLATE_FUNC = re.compile(r"\{(mention|role|random|dice):([^{}]*)\}")
 
 def _render_customscript_template(text, message) -> str:
     """送信テキスト内の差し込み変数・関数的記法を展開する。
@@ -3115,6 +3126,7 @@ def _render_customscript_template(text, message) -> str:
     - {channel} / {channel.name}                    : 実行先チャンネル
     - {mention:<ユーザーID>} / {role:<ロールID>}     : 任意のユーザー/ロールを引数付きでメンション（実際にpingが飛ぶ）
     - {random:候補A|候補B|候補C}                     : 「|」区切りの候補からランダムに1つ選択
+    - {dice:面数}                                    : 1〜面数のランダムな整数（サイコロ）
     """
     if not isinstance(text, str) or not text:
         return text
@@ -3134,6 +3146,11 @@ def _render_customscript_template(text, message) -> str:
             if key == "random":
                 options = [o for o in arg.split("|") if o != ""]
                 return random.choice(options) if options else ""
+            if key == "dice":
+                sides = int(arg.strip())
+                if 2 <= sides <= 1000:
+                    return str(random.randint(1, sides))
+                return m.group(0)
         except Exception:
             pass
         return m.group(0)
@@ -3209,6 +3226,8 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
             for emoji in action.get("emojis", [])[:10]:
                 try: await message.add_reaction(emoji)
                 except Exception: pass
+        elif t == "random_reaction":
+            await message.add_reaction(random.choice(_FUN_REACTION_POOL))
         elif t == "remove_all_reactions":
             await message.clear_reactions()
         elif t == "delete_message":
@@ -3275,6 +3294,15 @@ async def _run_customscript_action(action: dict, message: discord.Message, uploa
             msgs = action.get("messages", [])
             if msgs:
                 await message.channel.send(_render_customscript_template(random.choice(msgs), message)[:2000])
+        elif t == "countdown":
+            n = min(int(action.get("from", 3)), 10)
+            for i in range(n, 0, -1):
+                try: await message.channel.send(f"**{i}...**")
+                except Exception: pass
+                await asyncio.sleep(1)
+            final = action.get("final_message")
+            if final:
+                await message.channel.send(_render_customscript_template(final, message)[:2000])
         elif t == "rickroll":
             import io
             url = random.choice(RICK_GIFS)
@@ -3431,7 +3459,7 @@ async def process_customscript_voice(member: discord.Member, event_type: str, vo
         asyncio.create_task(run_customscript(script, ctx, entry.get("uploader_id")))
 
 @bot.tree.command(name="uploadscript", description="カスタムスクリプト(.json)をアップロードして登録します")
-@app_commands.describe(file="Web GUI(Blockly)で作成したスクリプトの.jsonファイル")
+@app_commands.describe(file="Script Builderで作成したスクリプトの.jsonファイル")
 async def cmd_uploadscript(interaction: discord.Interaction, file: discord.Attachment):
     await safe_defer(interaction, ephemeral=True)
     if not interaction.user.guild_permissions.manage_guild:
@@ -4314,6 +4342,9 @@ async def build_resource_embed(client: discord.Client) -> discord.Embed:
     up_sec = int(time.time() - START_TIME)
     d, rem = divmod(up_sec, 86400); h, rem = divmod(rem, 3600); m, s = divmod(rem, 60)
     uptime = f"{d}d {h:02d}:{m:02d}:{s:02d}"
+    cpu_up_sec = int(time.time() - psutil.boot_time())
+    cd, crem = divmod(cpu_up_sec, 86400); ch, crem = divmod(crem, 3600); cm, cs = divmod(crem, 60)
+    cpu_uptime = f"{cd}d {ch:02d}:{cm:02d}:{cs:02d}"
     lat    = round(client.latency * 1000, 1)
     db_size = 0
     if os.path.exists(DB_DIR):
@@ -4329,7 +4360,8 @@ async def build_resource_embed(client: discord.Client) -> discord.Embed:
     embed.add_field(name="CPU",        value=f"`{_bar(cpu)}` {cpu:.1f}%", inline=False)
     embed.add_field(name="メモリ",      value=f"`{_bar(mem.percent)}` {mem.percent:.1f}%  ({mem.used//1024//1024:,}MB / {mem.total//1024//1024:,}MB)", inline=False)
     embed.add_field(name="ストレージ",  value=f"`{_bar(disk.percent)}` {disk.percent:.1f}%  ({disk.used//1024**3:.1f}GB / {disk.total//1024**3:.1f}GB)", inline=False)
-    embed.add_field(name="アップタイム", value=uptime, inline=True)
+    embed.add_field(name="Botアップタイム", value=uptime, inline=True)
+    embed.add_field(name="CPU UPTIME",  value=cpu_uptime, inline=True)
     embed.add_field(name="Ping",        value=f"{lat} ms", inline=True)
     embed.add_field(name="db/",         value=f"{dsz:.1f} KB", inline=True)
     
@@ -4693,6 +4725,12 @@ async def cmd_restore(interaction: discord.Interaction, code: str = None):
 RICK_GIFS = [
     "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick.gif",
     "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick1.gif",
+]
+
+# customscriptの random_reaction アクションで使うお楽しみ絵文字プール
+_FUN_REACTION_POOL = [
+    "😂", "🎉", "🔥", "💯", "👀", "🤔", "😱", "🥳", "👏", "🫡",
+    "🤯", "😎", "🙈", "💀", "✨", "🎯", "🍕", "🐸", "👻", "🤡",
 ]
 
 
