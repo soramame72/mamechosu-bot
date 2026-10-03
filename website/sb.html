@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Custom Script Builder</title>
+<script src="https://unpkg.com/blockly/blockly.min.js"></script>
+<style>
+  :root{
+    --bg-app:     #ECF0F1;  /* Clouds */
+    --bg-panel:   #FFFFFF;
+    --line:       #BDC3C7;  /* Silver */
+    --text-hi:    #2C3E50;  /* Midnight Blue */
+    --text-mid:   #34495E;  /* Wet Asphalt */
+    --text-dim:   #7F8C8D;  /* Asbestos */
+    --indigo:     #2980B9;  /* Belize Hole（濃いめのフラットブルー） */
+    --indigo-soft:#D6EAF8;
+    --coral:      #C0392B;  /* Pomegranate（濃いめのフラットレッド） */
+    --coral-soft: #FADBD8;
+    --radius:     2px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:var(--bg-app);
+    color:var(--text-hi);
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+
+  /* ── ヘッダー（フラット） ── */
+  header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:14px 22px;
+    background:var(--bg-panel);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .mark{
+    width:32px; height:32px; border-radius:2px;
+    background:var(--indigo);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-weight:700; font-size:15px;
+    color:#fff;
+    flex-shrink:0;
+  }
+  .title-block h1{
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
+    font-size:16px; font-weight:600; letter-spacing:.01em;
+    margin:0; line-height:1.2; color:var(--text-hi);
+  }
+  .title-block p{
+    margin:2px 0 0; font-size:12px; color:var(--text-dim);
+  }
+  .flow{
+    margin-left:auto;
+    display:flex; align-items:center; gap:6px;
+    font-family:'Consolas','Menlo',monospace; font-size:11px; color:var(--text-mid);
+  }
+  .flow span.node{
+    padding:4px 10px; border-radius:2px; background:var(--indigo-soft); color:var(--indigo); font-weight:700;
+  }
+  .flow .wire{ width:16px; height:1px; background:var(--line); }
+
+  /* ── ツールバー ── */
+  .toolbar{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 22px; background:var(--bg-panel);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0; flex-wrap:wrap;
+  }
+  .toolbar label{ font-size:12px; color:var(--text-dim); margin-right:-4px; }
+  .toolbar input[type=text]{
+    background:var(--bg-app); border:1px solid var(--line); color:var(--text-hi);
+    border-radius:2px; padding:8px 10px; font-size:13px; font-family:'Consolas','Menlo',monospace;
+    min-width:200px;
+  }
+  .toolbar input[type=text]:focus{ outline:2px solid var(--indigo); outline-offset:1px; border-color:var(--indigo); }
+  .toolbar input[type=file]{ display:none; }
+
+  button{
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-weight:600; font-size:13px;
+    border:1px solid var(--line); background:var(--bg-panel); color:var(--text-hi);
+    padding:8px 14px; border-radius:2px; cursor:pointer; text-transform:uppercase; letter-spacing:.04em;
+    transition:background .12s ease, border-color .12s ease;
+  }
+  button:hover{ background:var(--bg-app); }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible{ outline:2px solid var(--indigo); outline-offset:2px; }
+
+  .btn-primary{
+    background:var(--coral);
+    border-color:var(--coral); color:#fff;
+  }
+  .btn-primary:hover{ background:#A93226; border-color:#A93226; }
+
+  .spacer{ flex:1; }
+
+  /* ── ワークスペース（フラット） ── */
+  #workspace-wrap{ position:relative; flex:1; min-height:0; padding:12px; }
+  #blockly-div{
+    position:absolute; inset:12px;
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(16px);
+    background:var(--text-hi); color:#fff;
+    padding:10px 16px; border-radius:2px; font-size:13px;
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
+    display:flex; align-items:center; gap:8px;
+    z-index:50;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast .dot{ width:6px; height:6px; border-radius:50%; background:#2ECC71; flex-shrink:0; }
+  .toast.err .dot{ background:#E74C3C; }
+
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb{ background:#BDC3C7; border-radius:0; }
+
+  /* ── モーダルパネル（APIテスト / シミュレーター共通） ── */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(44,62,80,.55);
+    display:none; align-items:center; justify-content:center; z-index:100;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-panel{
+    background:var(--bg-panel); border-radius:2px; width:min(720px,92vw);
+    max-height:86vh; display:flex; flex-direction:column; overflow:hidden;
+    border:2px solid var(--text-hi);
+  }
+  .modal-head{
+    display:flex; align-items:center; gap:10px; padding:16px 20px;
+    border-bottom:1px solid var(--line); flex-shrink:0;
+  }
+  .modal-head h2{ margin:0; font-size:15px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; }
+  .modal-head .modal-close{ margin-left:auto; }
+  .modal-body{ padding:16px 20px; overflow-y:auto; flex:1; min-height:0; }
+  .modal-foot{ display:flex; gap:8px; padding:12px 20px; border-top:1px solid var(--line); flex-shrink:0; }
+  .form-row{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .form-row label{ font-size:12px; color:var(--text-dim); }
+  .form-row input, .form-row textarea, .form-row select{
+    font-family:'Consolas','Menlo',monospace; font-size:13px;
+    border:1px solid var(--line); border-radius:2px; padding:8px 10px;
+    background:var(--bg-app); color:var(--text-hi); resize:vertical;
+  }
+  .form-row.inline{ flex-direction:row; align-items:center; gap:8px; }
+  .caveat{
+    background:var(--indigo-soft); color:var(--indigo); font-size:12px;
+    padding:10px 12px; border-radius:2px; margin-bottom:12px; line-height:1.5;
+  }
+  .api-log{ border:1px solid var(--line); border-radius:2px; max-height:220px; overflow-y:auto; }
+  .api-log-row{ padding:8px 10px; border-bottom:1px solid var(--line); font-size:12px; font-family:'Consolas','Menlo',monospace; cursor:pointer; }
+  .api-log-row:last-child{ border-bottom:none; }
+  .api-log-row:hover{ background:var(--bg-app); }
+  .api-log-row .status-ok{ color:#27AE60; font-weight:600; }
+  .api-log-row .status-ng{ color:#C0392B; font-weight:600; }
+  .resp-box{
+    background:#2C3E50; color:#ECF0F1; font-family:'Consolas','Menlo',monospace; font-size:12px;
+    padding:10px; border-radius:2px; white-space:pre-wrap; word-break:break-all;
+    max-height:220px; overflow-y:auto; margin-top:8px;
+  }
+
+  /* ── シミュレーター ── */
+  .sim-panel{ width:min(560px,92vw); }
+  .sim-chat{
+    background:#36393F; border-radius:2px; padding:10px; min-height:280px; max-height:360px;
+    overflow-y:auto; display:flex; flex-direction:column; gap:8px;
+  }
+  .sim-msg{ display:flex; gap:8px; font-size:13px; color:#DCDDDE; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; }
+  .sim-msg .avatar{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:#fff;
+  }
+  .sim-msg.user .avatar{ background:#5865F2; }
+  .sim-msg.bot .avatar{ background:#ED4245; }
+  .sim-msg .who{ font-weight:600; margin-right:6px; }
+  .sim-msg.bot .who{ color:#ED4245; }
+  .sim-msg .bubble{ white-space:pre-wrap; word-break:break-word; }
+  .sim-msg .badge{
+    display:inline-block; background:#2F3136; border:1px solid #4A4D53; color:#B9BBBE;
+    font-family:'Consolas','Menlo',monospace; font-size:10px; padding:1px 6px; border-radius:2px; margin-top:3px;
+  }
+  .sim-input-row{ display:flex; gap:8px; margin-top:10px; }
+  .sim-input-row input{ flex:1; }
+  .sim-vars{ margin-top:10px; font-size:11px; color:var(--text-dim); font-family:'Consolas','Menlo',monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="mark">⌁</div>
+  <div class="title-block">
+    <h1>Custom Script Builder</h1>
+  </div>
+</header>
+
+<div class="toolbar">
+  <label for="scriptName">スクリプト名</label>
+  <input type="text" id="scriptName" value="サンプルスクリプト" maxlength="50">
+
+  <span class="spacer"></span>
+
+  <button id="btnLoad">📂 読み込み</button>
+  <input type="file" id="fileInput" accept="application/json">
+  <button id="btnClear">🗑 クリア</button>
+  <button id="btnApiTest">🧪 APIテスト</button>
+  <button id="btnSimulator">💬 シミュレーター</button>
+  <button id="btnDownload" class="btn-primary">⬇ スクリプトをダウンロード (.json)</button>
+</div>
+
+<div id="workspace-wrap">
+  <div id="blockly-div"></div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg"></span></div>
+
+<!-- ══════════════════════════════════════════════
+     APIテストパネル
+     ══════════════════════════════════════════════ -->
+<div class="modal-overlay" id="apiTestOverlay">
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h2>🧪 APIテスト（ブラウザから試し打ち）</h2>
+      <button class="modal-close" id="apiTestClose">✕ 閉じる</button>
+    </div>
+    <div class="modal-body">
+      <div class="caveat">
+        ここでの送信はブラウザから直接行われるため、相手のAPIがブラウザからのアクセス（CORS）を
+        許可していない場合は失敗することがあります。実際にBotが送信するときはサーバーから直接
+        送るためCORSの影響は受けません。ここでの結果はあくまで「URL・ヘッダー・ボディの内容が
+        合っているかの下見」として使ってください。
+      </div>
+      <div class="form-row inline">
+        <button id="apiTestLoadFromBlock">📥 選択中の「APIリクエスト」ブロックから読み込む</button>
+      </div>
+      <div class="form-row inline">
+        <select id="apiTestMethod" style="width:110px">
+          <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+        </select>
+        <input type="text" id="apiTestUrl" placeholder="https://example.com/api" style="flex:1">
+      </div>
+      <div class="form-row">
+        <label>ヘッダー（1行に1つ、キー: 値）</label>
+        <textarea id="apiTestHeaders" rows="3" placeholder="Authorization: Bearer xxxx"></textarea>
+      </div>
+      <div class="form-row">
+        <label>ボディ</label>
+        <textarea id="apiTestBody" rows="3" placeholder='{"example": true}'></textarea>
+      </div>
+      <div class="form-row inline">
+        <button id="apiTestSend" class="btn-primary">▶ 送信してみる</button>
+        <span id="apiTestStatusLabel" style="font-size:12px;color:var(--text-dim)"></span>
+      </div>
+      <div class="resp-box" id="apiTestResp" style="display:none"></div>
+      <div class="form-row" style="margin-top:14px">
+        <label>テスト履歴（このページを開いている間だけ保持されます）</label>
+        <div class="api-log" id="apiTestLog"><div class="api-log-row" style="color:var(--text-dim)">まだ履歴はありません</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     簡易Discordシミュレーター
+     ══════════════════════════════════════════════ -->
+<div class="modal-overlay" id="simOverlay">
+  <div class="modal-panel sim-panel">
+    <div class="modal-head">
+      <h2>💬 簡易シミュレーター</h2>
+      <button class="modal-close" id="simClose">✕ 閉じる</button>
+    </div>
+    <div class="modal-body">
+      <div class="caveat" id="simCaveat">
+        今組んでいるスクリプトを、簡易的なチャット画面で試せます（メッセージ受信トリガーのみ対応）。
+        ロール付与やタイムアウトなど実際のサーバー操作は再現されず、ログとして表示されるだけです。
+        APIリクエストは既定では実際には送信されません（下のチェックで実際に送信するよう切り替えられます）。
+      </div>
+      <div class="form-row inline">
+        <input type="checkbox" id="simRealHttp" style="width:auto">
+        <label for="simRealHttp" style="font-size:12px">APIリクエストを実際に送信する（ブラウザのfetchで送信・CORSの影響を受けます）</label>
+      </div>
+      <div class="sim-chat" id="simChat"></div>
+      <div class="sim-input-row">
+        <input type="text" id="simFromName" placeholder="送信者名" value="テストユーザー" style="max-width:120px">
+        <input type="text" id="simInput" placeholder="メッセージを入力してEnter">
+        <button id="simSend" class="btn-primary">送信</button>
+      </div>
+      <div class="sim-vars" id="simVars"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CONDITION_OPTIONS = [
+  ["条件なし（常に反応）","any"],
+  ["完全一致 =","equals"],
+  ["含む",       "contains"],
+  ["で始まる",    "startswith"],
+  ["で終わる",    "endswith"],
+];
+const BOOL_OPTIONS = [["ON","true"],["OFF","false"]];
+
+const COLOUR_TRIGGER = '#27AE60';
+const TEMPLATE_HINT = ' 差し込み変数が使えます: {user} {user.name} {server} {channel} {member_count} {mention:ID} {role:ID} {random:A|B|C} {message} {var:変数名}';
+const COLOUR_ACTION  = '#2980B9';
+const COLOUR_VOICE   = '#16A085';
+const COLOUR_MOD     = '#C0392B';
+const COLOUR_FUN     = '#8E44AD';
+const COLOUR_LOGIC   = '#D35400';   // 変数・計算・もし（条件分岐）
+const COLOUR_API     = '#2C3E50';   // APIリクエスト
+const COLOUR_FUNC    = '#9B59B6';   // 関数（まとめて再利用）
+
+/* ── トリガー ── */
+Blockly.Blocks['trigger_on_message'] = {
+  init: function() {
+    this.appendDummyInput().appendField('⚡ メッセージを受信したとき');
+    this.appendDummyInput()
+        .appendField('  対象チャンネルID（空欄でOK・全チャンネル対象）')
+        .appendField(new Blockly.FieldTextInput(''), 'CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  発動条件')
+        .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
+        .appendField(new Blockly.FieldTextInput(''), 'COND_VALUE');
+    this.appendDummyInput()
+        .appendField('  Botのメッセージにも反応する')
+        .appendField(new Blockly.FieldCheckbox('FALSE'), 'REACT_TO_BOTS');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メッセージを受信した時に発動します。チャンネルIDと条件を空欄のままにすると、全チャンネル・無条件で反応します。「Botのメッセージにも反応する」にチェックを入れると、他のBotが送ったメッセージにもこのスクリプトが反応するようになります（このBot自身のメッセージには無限ループ防止のため反応しません）。');
+  }
+};
+
+Blockly.Blocks['trigger_on_member_join'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🚪 メンバーが参加したとき');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('新しいメンバーがサーバーに参加した時に発動します。メッセージが存在しないため実行先チャンネルの指定が必須です。');
+  }
+};
+
+Blockly.Blocks['trigger_on_member_leave'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🚶 メンバーが退出したとき');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがサーバーから退出した時に発動します。実行先チャンネルの指定が必須です。');
+  }
+};
+
+Blockly.Blocks['trigger_on_reaction_add'] = {
+  init: function() {
+    this.appendDummyInput().appendField('😀 リアクションが付いたとき');
+    this.appendDummyInput()
+        .appendField('  対象チャンネルID（空欄でOK・全チャンネル対象）')
+        .appendField(new Blockly.FieldTextInput(''), 'CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  絵文字条件')
+        .appendField(new Blockly.FieldDropdown(CONDITION_OPTIONS), 'COND_TYPE')
+        .appendField(new Blockly.FieldTextInput('👍'), 'COND_VALUE');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メッセージにリアクションが付いた時に発動します。絵文字条件を「完全一致」にすると特定の絵文字だけに絞り込めます。');
+  }
+};
+
+Blockly.Blocks['trigger_on_voice_join'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🔊 VCに参加したとき');
+    this.appendDummyInput()
+        .appendField('  対象VCのID(任意・絞り込み)')
+        .appendField(new Blockly.FieldTextInput(''), 'VOICE_CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがボイスチャンネルに参加した時に発動します。VCのIDを指定すると特定のVCのみに絞り込めます。');
+  }
+};
+
+Blockly.Blocks['trigger_on_voice_leave'] = {
+  init: function() {
+    this.appendDummyInput().appendField('🔈 VCから退出したとき');
+    this.appendDummyInput()
+        .appendField('  対象VCのID(任意・絞り込み)')
+        .appendField(new Blockly.FieldTextInput(''), 'VOICE_CHANNEL_ID');
+    this.appendDummyInput()
+        .appendField('  実行先チャンネルID')
+        .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+    this.appendStatementInput('ACTIONS').setCheck('action').appendField('▼ このとき実行するアクション');
+    this.setColour(COLOUR_TRIGGER);
+    this.setTooltip('メンバーがボイスチャンネルから退出した時に発動します。');
+  }
+};
+
+const TRIGGER_TYPES = [
+  ['trigger_on_message', '⚡ メッセージ受信'],
+  ['trigger_on_member_join', '🚪 メンバー参加'],
+  ['trigger_on_member_leave', '🚶 メンバー退出'],
+  ['trigger_on_reaction_add', '😀 リアクション追加'],
+  ['trigger_on_voice_join', '🔊 VC参加'],
+  ['trigger_on_voice_leave', '🔈 VC退出'],
+];
+
+// Blockly.FieldMultilineInput は読み込む Blockly のビルドによってはコアに含まれておらず
+// 「is not a constructor」で落ちることがあるため、存在すれば使い、無ければ安全に1行入力へフォールバックする。
+function makeMultilineField(initial) {
+  if (typeof Blockly.FieldMultilineInput === 'function') {
+    return new Blockly.FieldMultilineInput(initial);
+  }
+  return new Blockly.FieldTextInput(initial);
+}
+
+function defineActionBlock(type, colour, tooltip, initFn) {
+  Blockly.Blocks[type] = {
+    init: function() {
+      initFn.call(this);
+      this.setPreviousStatement(true, 'action');
+      this.setNextStatement(true, 'action');
+      this.setColour(colour);
+      this.setTooltip(tooltip);
+    }
+  };
+}
+
+/* ── 待機 ── */
+defineActionBlock('action_delay', COLOUR_ACTION, '指定ミリ秒だけ待機してから次のアクションに進みます。', function() {
+  this.appendDummyInput()
+      .appendField('⏱ 待機')
+      .appendField(new Blockly.FieldNumber(1000, 0, 3600000, 1), 'MS')
+      .appendField('ミリ秒（最大3600000=1時間）');
+});
+defineActionBlock('action_random_delay', COLOUR_ACTION, 'min〜maxミリ秒の範囲でランダムに待機します。', function() {
+  this.appendDummyInput()
+      .appendField('🎲 ランダム待機')
+      .appendField(new Blockly.FieldNumber(500, 0, 3600000, 1), 'MIN_MS')
+      .appendField('〜')
+      .appendField(new Blockly.FieldNumber(2000, 0, 3600000, 1), 'MAX_MS')
+      .appendField('ミリ秒');
+});
+
+/* ── メッセージ ── */
+defineActionBlock('action_send_message', COLOUR_ACTION, 'トリガーの実行先チャンネルにメッセージを送信します（最大2000文字）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('💬 メッセージ送信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_reply', COLOUR_ACTION, 'トリガーとなったメッセージに返信します（メッセージ受信/リアクショントリガーのみ有効）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('↩ 返信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_random_message', COLOUR_ACTION, '複数候補からランダムに1つ選んで送信します。「|」区切りで複数入力してください（最大10個）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🔀 ランダムメッセージ送信')
+      .appendField(new Blockly.FieldTextInput('おはよう|こんにちは|こんばんは'), 'MESSAGES');
+});
+defineActionBlock('action_send_embed', COLOUR_ACTION, 'タイトル・説明・色を指定してEmbedを送信します（タイトルか説明のどちらかは必須）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput().appendField('🖼 Embed送信');
+  this.appendDummyInput()
+      .appendField('  タイトル')
+      .appendField(new Blockly.FieldTextInput(''), 'TITLE');
+  this.appendDummyInput()
+      .appendField('  説明')
+      .appendField(new Blockly.FieldTextInput(''), 'DESCRIPTION');
+  this.appendDummyInput()
+      .appendField('  色(16進・#無し)')
+      .appendField(new Blockly.FieldTextInput('4F46E5'), 'COLOR');
+});
+defineActionBlock('action_send_dm', COLOUR_ACTION, '対象ユーザーにDMを送ります（DMを許可していない場合は何も起きません）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('✉ DM送信')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+defineActionBlock('action_send_to_channel', COLOUR_ACTION, '指定したチャンネルIDにメッセージを送信します。送信先チャンネルであなた自身とBotの両方に送信権限が必要です。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('📮 他chへ送信  channel_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'CHANNEL_ID');
+  this.appendDummyInput()
+      .appendField('  内容')
+      .appendField(new Blockly.FieldTextInput('hi'), 'CONTENT');
+});
+
+/* ── メッセージ操作 ── */
+defineActionBlock('action_add_reaction', COLOUR_ACTION, 'メッセージに絵文字リアクションを1つ付けます（メッセージ受信/リアクショントリガーのみ有効）。', function() {
+  this.appendDummyInput()
+      .appendField('😀 リアクション付与')
+      .appendField(new Blockly.FieldTextInput('👍'), 'EMOJI');
+});
+defineActionBlock('action_add_multiple_reactions', COLOUR_ACTION, '複数の絵文字リアクションをまとめて付けます。スペース区切りで最大10個。', function() {
+  this.appendDummyInput()
+      .appendField('😀😆 複数リアクション付与')
+      .appendField(new Blockly.FieldTextInput('👍 ❤️ 😆'), 'EMOJIS');
+});
+defineActionBlock('action_remove_all_reactions', COLOUR_ACTION, 'メッセージのリアクションをすべて削除します。', function() {
+  this.appendDummyInput().appendField('🧹 リアクション全削除');
+});
+defineActionBlock('action_delete_message', COLOUR_ACTION, 'トリガーとなったメッセージを削除します。', function() {
+  this.appendDummyInput().appendField('🗑 このメッセージを削除');
+});
+defineActionBlock('action_pin_message', COLOUR_ACTION, 'メッセージをピン留めします。', function() {
+  this.appendDummyInput().appendField('📌 メッセージを固定');
+});
+defineActionBlock('action_unpin_message', COLOUR_ACTION, 'メッセージのピン留めを解除します。', function() {
+  this.appendDummyInput().appendField('📌 固定を解除');
+});
+
+/* ── メンバー操作 ── */
+defineActionBlock('action_add_role', COLOUR_ACTION, '対象ユーザーにロールを付与します。', function() {
+  this.appendDummyInput()
+      .appendField('➕ ロール付与  role_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
+});
+defineActionBlock('action_remove_role', COLOUR_ACTION, '対象ユーザーからロールを外します。', function() {
+  this.appendDummyInput()
+      .appendField('➖ ロール剥奪  role_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'ROLE_ID');
+});
+defineActionBlock('action_set_nickname', COLOUR_ACTION, '対象ユーザーのニックネームを変更します（空欄でリセット）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('✏ ニックネーム変更')
+      .appendField(new Blockly.FieldTextInput(''), 'NICKNAME');
+});
+
+/* ── チャンネル操作 ── */
+defineActionBlock('action_create_thread', COLOUR_ACTION, 'トリガーとなったメッセージからスレッドを作成します（メッセージ受信/リアクショントリガーのみ有効）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🧵 スレッド作成  名前:')
+      .appendField(new Blockly.FieldTextInput('スレッド'), 'NAME');
+});
+defineActionBlock('action_set_channel_topic', COLOUR_ACTION, 'このチャンネルのトピックを変更します。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('📝 チャンネルトピック変更')
+      .appendField(new Blockly.FieldTextInput(''), 'TOPIC');
+});
+defineActionBlock('action_set_slowmode', COLOUR_ACTION, 'このチャンネルのスローモードを設定します（最大21600秒=6時間、0で解除）。', function() {
+  this.appendDummyInput()
+      .appendField('🐌 スローモード設定')
+      .appendField(new Blockly.FieldNumber(5, 0, 21600, 1), 'SECONDS')
+      .appendField('秒');
+});
+
+/* ── ボイスチャンネル操作 ── */
+defineActionBlock('action_move_voice_channel', COLOUR_VOICE, '対象ユーザーを指定のVCへ移動します。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput()
+      .appendField('➡ VC移動  target_channel_id:')
+      .appendField(new Blockly.FieldTextInput('000000000000000000'), 'TARGET_CHANNEL_ID');
+});
+defineActionBlock('action_disconnect_voice', COLOUR_VOICE, '対象ユーザーをボイスチャンネルから切断します。', function() {
+  this.appendDummyInput().appendField('⏏ VC切断');
+});
+defineActionBlock('action_set_voice_mute', COLOUR_VOICE, '対象ユーザーをサーバーミュートON/OFFします。', function() {
+  this.appendDummyInput()
+      .appendField('🔇 サーバーミュート')
+      .appendField(new Blockly.FieldDropdown(BOOL_OPTIONS), 'MUTE');
+});
+defineActionBlock('action_set_voice_deafen', COLOUR_VOICE, '対象ユーザーをサーバースピーカーミュートON/OFFします。', function() {
+  this.appendDummyInput()
+      .appendField('🔕 サーバースピーカーミュート')
+      .appendField(new Blockly.FieldDropdown(BOOL_OPTIONS), 'DEAFEN');
+});
+
+/* ── モデレーション（要権限） ── */
+defineActionBlock('action_timeout', COLOUR_MOD, '対象ユーザーをタイムアウトします（最大28日）。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput()
+      .appendField('🔇 タイムアウト')
+      .appendField(new Blockly.FieldNumber(60, 1, 2419200, 1), 'SECONDS')
+      .appendField('秒');
+});
+defineActionBlock('action_remove_timeout', COLOUR_MOD, '対象ユーザーのタイムアウトを解除します。', function() {
+  this.appendDummyInput().appendField('🔊 タイムアウト解除');
+});
+defineActionBlock('action_kick', COLOUR_MOD, '対象ユーザーをサーバーからキックします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🚪 キック');
+});
+defineActionBlock('action_ban', COLOUR_MOD, '対象ユーザーをサーバーからBANします。実行時にあなたとBotの権限を再確認します。', function() {
+  this.appendDummyInput().appendField('🔨 BAN');
+});
+
+/* ── お楽しみ ── */
+defineActionBlock('action_rickroll', COLOUR_FUN, 'ランダムなリックロールGIFを送信します。', function() {
+  this.appendDummyInput().appendField('🕺 リックロールを表示');
+});
+defineActionBlock('action_countdown', COLOUR_FUN, '「3… 2… 1…」のようにカウントダウンしてから、任意で最後のメッセージを送信します（1メッセージ=1秒間隔）。', function() {
+  this.appendDummyInput()
+      .appendField('⏳ カウントダウン')
+      .appendField(new Blockly.FieldNumber(3, 1, 10, 1), 'FROM')
+      .appendField('から0まで');
+  this.appendDummyInput()
+      .appendField('  最後に送るメッセージ(任意)')
+      .appendField(new Blockly.FieldTextInput('🎉 スタート！'), 'FINAL_MESSAGE');
+});
+defineActionBlock('action_random_reaction', COLOUR_FUN, '😂🎉🔥など、お楽しみ絵文字プールからランダムに1つ選んでリアクションします。', function() {
+  this.appendDummyInput().appendField('🎁 サプライズリアクション（ランダム絵文字）');
+});
+defineActionBlock('action_coin_flip', COLOUR_FUN, 'コイントスの結果（表/裏）をランダムに送信します。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🪙 コイントス')
+      .appendField(new Blockly.FieldTextInput('🪙 コイントスの結果… **{random:表|裏}**！'), 'CONTENT');
+});
+defineActionBlock('action_dice_roll', COLOUR_FUN, '{dice:面数} の面数部分を書き換えるだけで何面のサイコロにも変更できます。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🎲 サイコロを振る')
+      .appendField(new Blockly.FieldTextInput('🎲 サイコロの結果… **{dice:6}**！'), 'CONTENT');
+});
+
+/* ══════════════════════════════════════════════
+   プログラミング系ブロック（変数・計算・もし・APIリクエスト・関数）
+   初心者向け: テキスト欄に {var:変数名} と書くだけで、他のブロックで保存した値を
+   どこにでも差し込めます（メッセージ内容・URL・ヘッダー・条件など、全ての欄で共通）。
+   ══════════════════════════════════════════════ */
+
+const VAR_NAME_HINT = '（半角英数字とアンダースコアのみ・先頭は英字かアンダースコア・32文字以内）';
+
+/* ── 変数 ── */
+defineActionBlock('action_set_variable', COLOUR_LOGIC,
+  '変数に値を保存します。保存した値は他のブロックから {var:変数名} で呼び出せます。' + VAR_NAME_HINT, function() {
+  this.appendDummyInput()
+      .appendField('📦 変数')
+      .appendField(new Blockly.FieldTextInput('myvar'), 'NAME')
+      .appendField('に');
+  this.appendDummyInput()
+      .appendField('  値')
+      .appendField(new Blockly.FieldTextInput(''), 'VALUE')
+      .appendField('を保存');
+});
+
+/* ── 計算 ── */
+const MATH_OP_OPTIONS = [
+  ['＋ たす', '+'], ['－ ひく', '-'], ['× かける', '*'], ['÷ わる', '/'],
+  ['% あまり', '%'], ['大きい方(min)', 'min'], ['小さい方(max)', 'max'],
+];
+defineActionBlock('action_math', COLOUR_LOGIC,
+  '2つの数値を計算して、結果を変数に保存します。数値の代わりに {var:変数名} を使うこともできます。' + VAR_NAME_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🧮 変数')
+      .appendField(new Blockly.FieldTextInput('result'), 'TARGET')
+      .appendField('に');
+  this.appendDummyInput()
+      .appendField('  ')
+      .appendField(new Blockly.FieldTextInput('0'), 'LEFT')
+      .appendField(new Blockly.FieldDropdown(MATH_OP_OPTIONS), 'OP')
+      .appendField(new Blockly.FieldTextInput('0'), 'RIGHT')
+      .appendField('の結果を保存');
+});
+
+/* ── JSON取得（APIレスポンスなどから値を取り出す） ── */
+defineActionBlock('action_json_get', COLOUR_LOGIC,
+  'JSON形式の文字列が入っている変数から、指定した項目だけを取り出して別の変数に保存します。' +
+  '例: パス欄に「data.items.0.name」と書くと { "data": { "items": [ { "name": "りんご" } ] } } から「りんご」を取り出せます。' + VAR_NAME_HINT, function() {
+  this.appendDummyInput().appendField('🔎 JSONから値を取得');
+  this.appendDummyInput()
+      .appendField('  変数')
+      .appendField(new Blockly.FieldTextInput('body'), 'SOURCE')
+      .appendField('の中の');
+  this.appendDummyInput()
+      .appendField('  パス')
+      .appendField(new Blockly.FieldTextInput('data.name'), 'PATH');
+  this.appendDummyInput()
+      .appendField('  を変数')
+      .appendField(new Blockly.FieldTextInput('result'), 'TARGET')
+      .appendField('に保存');
+});
+
+/* ── もし（条件分岐） ── */
+const IF_OP_OPTIONS = [
+  ['と等しい', 'equals'], ['と等しくない', 'not_equals'],
+  ['を含む', 'contains'], ['を含まない', 'not_contains'],
+  ['で始まる', 'startswith'], ['で終わる', 'endswith'],
+  ['より大きい(数値)', 'gt'], ['以上(数値)', 'gte'],
+  ['より小さい(数値)', 'lt'], ['以下(数値)', 'lte'],
+];
+defineActionBlock('action_if', COLOUR_LOGIC,
+  '条件を満たすかどうかで実行する内容を分岐します。数値比較（より大きい等）は両方が数値として読める場合のみ判定されます。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput().appendField('🔀 もし');
+  this.appendDummyInput()
+      .appendField('  ')
+      .appendField(new Blockly.FieldTextInput(''), 'LEFT')
+      .appendField('が')
+      .appendField(new Blockly.FieldDropdown(IF_OP_OPTIONS), 'OP')
+      .appendField(new Blockly.FieldTextInput(''), 'RIGHT');
+  this.appendStatementInput('THEN').setCheck('action').appendField('  なら▼');
+  this.appendStatementInput('ELSE').setCheck('action').appendField('そうでなければ▼（空でもOK）');
+});
+
+/* ── APIリクエスト ── */
+const HTTP_METHOD_OPTIONS = [['GET', 'GET'], ['POST', 'POST'], ['PUT', 'PUT'], ['PATCH', 'PATCH'], ['DELETE', 'DELETE']];
+defineActionBlock('action_http_request', COLOUR_API,
+  '外部のAPIにリクエストを送ります。安全のため、サーバー内部やプライベートIP宛のリクエストは自動的にブロックされ、' +
+  'タイムアウトは最大8秒、1サーバーあたり1分間に最大10回までの制限があります（制限を超えた場合は静かにスキップされます）。' +
+  'ヘッダーは「キー: 値」の形式で、複数ある場合は改行または「|」で区切って入力してください（例: Authorization: Bearer xxxx | X-Key: 123）。' + TEMPLATE_HINT, function() {
+  this.appendDummyInput()
+      .appendField('🌐')
+      .appendField(new Blockly.FieldDropdown(HTTP_METHOD_OPTIONS), 'METHOD')
+      .appendField('リクエストを送る');
+  this.appendDummyInput()
+      .appendField('  URL')
+      .appendField(new Blockly.FieldTextInput('https://'), 'URL');
+  this.appendDummyInput()
+      .appendField('  ヘッダー（改行または | 区切りで複数可、例 キー: 値 | キー2: 値2）');
+  this.appendDummyInput()
+      .appendField(makeMultilineField(''), 'HEADERS');
+  this.appendDummyInput()
+      .appendField('  ボディ（JSON文字列など・GET/DELETEでは通常不要）');
+  this.appendDummyInput()
+      .appendField(makeMultilineField(''), 'BODY');
+  this.appendDummyInput()
+      .appendField('  タイムアウト(秒・最大8)')
+      .appendField(new Blockly.FieldNumber(5, 1, 8), 'TIMEOUT');
+  this.appendDummyInput()
+      .appendField('  結果のステータスコードを変数')
+      .appendField(new Blockly.FieldTextInput('status'), 'STORE_STATUS')
+      .appendField('に保存（任意）');
+  this.appendDummyInput()
+      .appendField('  結果の本文(レスポンス)を変数')
+      .appendField(new Blockly.FieldTextInput('body'), 'STORE_BODY')
+      .appendField('に保存（任意）');
+});
+
+/* ── 関数（まとめて再利用） ──
+   トリガーブロックとは別に、ワークスペースに単独で置くブロック。
+   「関数を呼び出す」ブロックから名前で呼び出せます。 */
+Blockly.Blocks['action_define_procedure'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField('🧩 関数')
+        .appendField(new Blockly.FieldTextInput('myFunction'), 'NAME')
+        .appendField('を定義');
+    this.appendStatementInput('STACK').setCheck('action').appendField('▼ 中身');
+    this.setColour(COLOUR_FUNC);
+    this.setTooltip('まとめて何度も使う処理に名前を付けて定義します。トリガーの中などから「🧩 関数を呼び出す」ブロックで実行できます。' + VAR_NAME_HINT);
+  }
+};
+defineActionBlock('action_call_procedure', COLOUR_FUNC,
+  '定義済みの関数を呼び出して実行します。関数名はワークスペースに置いた「🧩 関数を定義」ブロックの名前と一致させてください。', function() {
+  this.appendDummyInput()
+      .appendField('🧩 関数')
+      .appendField(new Blockly.FieldTextInput('myFunction'), 'NAME')
+      .appendField('を呼び出す');
+});
+
+const toolbox = {
+  kind: 'categoryToolbox',
+  contents: [
+    { kind: 'category', name: 'トリガー', colour: COLOUR_TRIGGER,
+      contents: [
+        { kind: 'block', type: 'trigger_on_message' },
+        { kind: 'block', type: 'trigger_on_member_join' },
+        { kind: 'block', type: 'trigger_on_member_leave' },
+        { kind: 'block', type: 'trigger_on_reaction_add' },
+        { kind: 'block', type: 'trigger_on_voice_join' },
+        { kind: 'block', type: 'trigger_on_voice_leave' },
+      ]},
+    { kind: 'category', name: '待機', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_delay' },
+        { kind: 'block', type: 'action_random_delay' },
+      ]},
+    { kind: 'category', name: 'メッセージ', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_send_message' },
+        { kind: 'block', type: 'action_reply' },
+        { kind: 'block', type: 'action_random_message' },
+        { kind: 'block', type: 'action_send_embed' },
+        { kind: 'block', type: 'action_send_dm' },
+        { kind: 'block', type: 'action_send_to_channel' },
+      ]},
+    { kind: 'category', name: 'メッセージ操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_add_reaction' },
+        { kind: 'block', type: 'action_add_multiple_reactions' },
+        { kind: 'block', type: 'action_remove_all_reactions' },
+        { kind: 'block', type: 'action_delete_message' },
+        { kind: 'block', type: 'action_pin_message' },
+        { kind: 'block', type: 'action_unpin_message' },
+      ]},
+    { kind: 'category', name: 'メンバー操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_add_role' },
+        { kind: 'block', type: 'action_remove_role' },
+        { kind: 'block', type: 'action_set_nickname' },
+      ]},
+    { kind: 'category', name: 'チャンネル操作', colour: COLOUR_ACTION,
+      contents: [
+        { kind: 'block', type: 'action_create_thread' },
+        { kind: 'block', type: 'action_set_channel_topic' },
+        { kind: 'block', type: 'action_set_slowmode' },
+      ]},
+    { kind: 'category', name: 'ボイスチャンネル操作', colour: COLOUR_VOICE,
+      contents: [
+        { kind: 'block', type: 'action_move_voice_channel' },
+        { kind: 'block', type: 'action_disconnect_voice' },
+        { kind: 'block', type: 'action_set_voice_mute' },
+        { kind: 'block', type: 'action_set_voice_deafen' },
+      ]},
+    { kind: 'category', name: 'モデレーション（要権限）', colour: COLOUR_MOD,
+      contents: [
+        { kind: 'block', type: 'action_timeout' },
+        { kind: 'block', type: 'action_remove_timeout' },
+        { kind: 'block', type: 'action_kick' },
+        { kind: 'block', type: 'action_ban' },
+      ]},
+    { kind: 'category', name: 'お楽しみ', colour: COLOUR_FUN,
+      contents: [
+        { kind: 'block', type: 'action_rickroll' },
+        { kind: 'block', type: 'action_countdown' },
+        { kind: 'block', type: 'action_random_reaction' },
+        { kind: 'block', type: 'action_coin_flip' },
+        { kind: 'block', type: 'action_dice_roll' },
+      ]},
+    { kind: 'category', name: '変数・計算・もし', colour: COLOUR_LOGIC,
+      contents: [
+        { kind: 'block', type: 'action_set_variable' },
+        { kind: 'block', type: 'action_math' },
+        { kind: 'block', type: 'action_json_get' },
+        { kind: 'block', type: 'action_if' },
+      ]},
+    { kind: 'category', name: 'APIリクエスト', colour: COLOUR_API,
+      contents: [
+        { kind: 'block', type: 'action_http_request' },
+      ]},
+    { kind: 'category', name: '関数', colour: COLOUR_FUNC,
+      contents: [
+        { kind: 'block', type: 'action_define_procedure' },
+        { kind: 'block', type: 'action_call_procedure' },
+      ]},
+  ]
+};
+
+const workspace = Blockly.inject('blockly-div', {
+  toolbox: toolbox,
+  theme: Blockly.Theme.defineTheme('scriptBuilderFlat', {
+    base: Blockly.Themes.Classic,
+    componentStyles: {
+      workspaceBackgroundColour: '#FFFFFF',
+      toolboxBackgroundColour: '#ECF0F1',
+      toolboxForegroundColour: '#2C3E50',
+      flyoutBackgroundColour: '#ECF0F1',
+      flyoutForegroundColour: '#2C3E50',
+      flyoutOpacity: 1,
+      scrollbarColour: '#BDC3C7',
+      insertionMarkerColour: '#2980B9',
+      insertionMarkerOpacity: 0.35,
+    }
+  }),
+  grid: { spacing: 24, length: 2, colour: '#D5D8DC', snap: true },
+  zoom: { controls: true, wheel: true, startScale: 0.9 },
+  trashcan: true,
+  renderer: 'geras',
+});
+
+// 初期状態：トリガーブロックを1つ置いておく
+(function seed(){
+  const b = workspace.newBlock('trigger_on_message');
+  b.initSvg(); b.render();
+  b.moveBy(40, 40);
+})();
+
+// ══════════════════════════════════════════════
+// トースト通知
+// ══════════════════════════════════════════════
+let toastTimer = null;
+function showToast(msg, isErr) {
+  const el = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+// ══════════════════════════════════════════════
+// Blockly → JSON シリアライズ
+// ══════════════════════════════════════════════
+// アクションのチェーン（getNextBlockで繋がった一続き）をJSON配列に変換する。
+// if ブロックの THEN/ELSE や、関数定義の中身（STACK）など、どの「アクションの連なり」にも使う共通処理。
+function actionStackToJson(startBlock, maxCount) {
+  const actions = [];
+  let cur = startBlock;
+  while (cur) {
+    const a = actionBlockToJson(cur);
+    if (a) actions.push(a);
+    cur = cur.getNextBlock();
+  }
+  if (actions.length > maxCount) {
+    throw new Error('アクション数が多すぎます（1つのまとまりにつき最大' + maxCount + '個までです、現在' + actions.length + '個）。');
+  }
+  return actions;
+}
+
+function parseHeaderLines(raw) {
+  // 複数行入力に対応していない環境（1行テキスト欄にフォールバックした場合）でも使えるよう、
+  // 改行だけでなく「|」区切りでも複数ヘッダーを書けるようにする
+  return String(raw || '')
+    .split(/\n|\|/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const idx = line.indexOf(':');
+      if (idx === -1) return { key: line, value: '' };
+      return { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    })
+    .filter(h => h.key)
+    .slice(0, 10);
+}
+
+function actionBlockToJson(block) {
+  switch (block.type) {
+    case 'action_set_variable':
+      return { type: 'set_variable', name: block.getFieldValue('NAME'), value: block.getFieldValue('VALUE') };
+    case 'action_math':
+      return {
+        type: 'math',
+        target: block.getFieldValue('TARGET'),
+        left: block.getFieldValue('LEFT'),
+        op: block.getFieldValue('OP'),
+        right: block.getFieldValue('RIGHT'),
+      };
+    case 'action_json_get':
+      return {
+        type: 'json_get',
+        source: block.getFieldValue('SOURCE'),
+        path: block.getFieldValue('PATH'),
+        target: block.getFieldValue('TARGET'),
+      };
+    case 'action_if': {
+      const left  = block.getFieldValue('LEFT') || '';
+      const op    = block.getFieldValue('OP') || 'equals';
+      const right = block.getFieldValue('RIGHT') || '';
+      const thenActions = actionStackToJson(block.getInputTargetBlock('THEN'), 20);
+      if (thenActions.length === 0) {
+        throw new Error('「もし」ブロックの「なら」の中身が空です。実行したいアクションを入れてください。');
+      }
+      const elseStart = block.getInputTargetBlock('ELSE');
+      const elseActions = elseStart ? actionStackToJson(elseStart, 20) : [];
+      const out = { type: 'if', condition: { left, op, right }, then: thenActions };
+      if (elseActions.length > 0) out.else = elseActions;
+      return out;
+    }
+    case 'action_call_procedure':
+      return { type: 'call_procedure', name: (block.getFieldValue('NAME') || '').trim() };
+    case 'action_http_request': {
+      const out = {
+        type: 'http_request',
+        method: block.getFieldValue('METHOD'),
+        url: block.getFieldValue('URL'),
+        timeout_sec: Number(block.getFieldValue('TIMEOUT')) || 5,
+      };
+      const headers = parseHeaderLines(block.getFieldValue('HEADERS'));
+      if (headers.length > 0) out.headers = headers;
+      const body = block.getFieldValue('BODY');
+      if (body) out.body = body;
+      const storeStatus = (block.getFieldValue('STORE_STATUS') || '').trim();
+      const storeBody   = (block.getFieldValue('STORE_BODY') || '').trim();
+      if (storeStatus) out.store_status = storeStatus;
+      if (storeBody) out.store_body = storeBody;
+      return out;
+    }
+    case 'action_delay':
+      return { type: 'delay', ms: Number(block.getFieldValue('MS')) };
+    case 'action_random_delay':
+      return { type: 'random_delay', min_ms: Number(block.getFieldValue('MIN_MS')), max_ms: Number(block.getFieldValue('MAX_MS')) };
+    case 'action_send_message':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
+    case 'action_reply':
+      return { type: 'reply', content: block.getFieldValue('CONTENT') };
+    case 'action_random_message':
+      return { type: 'random_message', messages: block.getFieldValue('MESSAGES').split('|').map(s => s.trim()).filter(Boolean) };
+    case 'action_send_embed': {
+      const out = { type: 'send_embed' };
+      const title = block.getFieldValue('TITLE'); if (title) out.title = title;
+      const desc  = block.getFieldValue('DESCRIPTION'); if (desc) out.description = desc;
+      const color = block.getFieldValue('COLOR'); if (color) out.color = color;
+      return out;
+    }
+    case 'action_send_dm':
+      return { type: 'send_dm', content: block.getFieldValue('CONTENT') };
+    case 'action_send_to_channel':
+      return { type: 'send_to_channel', channel_id: block.getFieldValue('CHANNEL_ID'), content: block.getFieldValue('CONTENT') };
+    case 'action_add_reaction':
+      return { type: 'add_reaction', emoji: block.getFieldValue('EMOJI') };
+    case 'action_add_multiple_reactions':
+      return { type: 'add_multiple_reactions', emojis: block.getFieldValue('EMOJIS').split(/\s+/).filter(Boolean) };
+    case 'action_remove_all_reactions':
+      return { type: 'remove_all_reactions' };
+    case 'action_delete_message':
+      return { type: 'delete_message' };
+    case 'action_pin_message':
+      return { type: 'pin_message' };
+    case 'action_unpin_message':
+      return { type: 'unpin_message' };
+    case 'action_add_role':
+      return { type: 'add_role', role_id: block.getFieldValue('ROLE_ID') };
+    case 'action_remove_role':
+      return { type: 'remove_role', role_id: block.getFieldValue('ROLE_ID') };
+    case 'action_set_nickname':
+      return { type: 'set_nickname', nickname: block.getFieldValue('NICKNAME') };
+    case 'action_create_thread':
+      return { type: 'create_thread', name: block.getFieldValue('NAME') };
+    case 'action_set_channel_topic':
+      return { type: 'set_channel_topic', topic: block.getFieldValue('TOPIC') };
+    case 'action_set_slowmode':
+      return { type: 'set_slowmode', seconds: Number(block.getFieldValue('SECONDS')) };
+    case 'action_move_voice_channel':
+      return { type: 'move_voice_channel', target_channel_id: block.getFieldValue('TARGET_CHANNEL_ID') };
+    case 'action_disconnect_voice':
+      return { type: 'disconnect_voice' };
+    case 'action_set_voice_mute':
+      return { type: 'set_voice_mute', mute: block.getFieldValue('MUTE') === 'true' };
+    case 'action_set_voice_deafen':
+      return { type: 'set_voice_deafen', deafen: block.getFieldValue('DEAFEN') === 'true' };
+    case 'action_timeout':
+      return { type: 'timeout', seconds: Number(block.getFieldValue('SECONDS')) };
+    case 'action_remove_timeout':
+      return { type: 'remove_timeout' };
+    case 'action_kick':
+      return { type: 'kick' };
+    case 'action_ban':
+      return { type: 'ban' };
+    case 'action_rickroll':
+      return { type: 'rickroll' };
+    case 'action_countdown':
+      return { type: 'countdown', from: Number(block.getFieldValue('FROM')), final_message: block.getFieldValue('FINAL_MESSAGE') };
+    case 'action_random_reaction':
+      return { type: 'random_reaction' };
+    case 'action_coin_flip':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
+    case 'action_dice_roll':
+      return { type: 'send_message', content: block.getFieldValue('CONTENT') };
+    default:
+      return null;
+  }
+}
+
+function triggerBlockToJson(trigger) {
+  switch (trigger.type) {
+    case 'trigger_on_message': {
+      const condType = trigger.getFieldValue('COND_TYPE');
+      const condValue = trigger.getFieldValue('COND_VALUE');
+      const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
+      const raw = (trigger.getFieldValue('CHANNEL_ID') || '').trim();
+      const out = { type: 'on_message', channel_id: raw || null, condition: condition };
+      if (trigger.getFieldValue('REACT_TO_BOTS') === 'TRUE') out.react_to_bots = true;
+      return out;
+    }
+    case 'trigger_on_member_join':
+      return { type: 'on_member_join', channel_id: trigger.getFieldValue('CHANNEL_ID').trim() };
+    case 'trigger_on_member_leave':
+      return { type: 'on_member_leave', channel_id: trigger.getFieldValue('CHANNEL_ID').trim() };
+    case 'trigger_on_reaction_add': {
+      const condType = trigger.getFieldValue('COND_TYPE');
+      const condValue = trigger.getFieldValue('COND_VALUE');
+      const condition = condType === 'any' ? { type: 'any' } : { type: condType, value: condValue || '' };
+      const raw = (trigger.getFieldValue('CHANNEL_ID') || '').trim();
+      return { type: 'on_reaction_add', channel_id: raw || null, condition: condition };
+    }
+    case 'trigger_on_voice_join':
+    case 'trigger_on_voice_leave': {
+      const out = {
+        type: trigger.type === 'trigger_on_voice_join' ? 'on_voice_join' : 'on_voice_leave',
+        channel_id: trigger.getFieldValue('CHANNEL_ID').trim(),
+      };
+      const vch = (trigger.getFieldValue('VOICE_CHANNEL_ID') || '').trim();
+      if (vch) out.voice_channel_id = vch;
+      return out;
+    }
+    default:
+      return null;
+  }
+}
+
+function buildScriptJson() {
+  const allTriggerTypes = TRIGGER_TYPES.map(t => t[0]);
+  const triggerBlocks = workspace.getTopBlocks(true).filter(b => allTriggerTypes.includes(b.type));
+  if (triggerBlocks.length === 0) {
+    throw new Error('トリガーブロックが見つかりません。「トリガー」カテゴリからブロックを配置してください。');
+  }
+  if (triggerBlocks.length > 1) {
+    throw new Error('トリガーブロックは1つだけ配置してください（現在 ' + triggerBlocks.length + ' 個あります）。');
+  }
+  const triggerBlock = triggerBlocks[0];
+  const trigger = triggerBlockToJson(triggerBlock);
+  if (!trigger) {
+    throw new Error('トリガーの内容を読み取れませんでした。');
+  }
+
+  const actions = actionStackToJson(triggerBlock.getInputTargetBlock('ACTIONS'), 20);
+  if (actions.length === 0) {
+    throw new Error('アクションが1つもありません。「実行するアクション」の中にブロックを繋げてください。');
+  }
+
+  // 関数（ワークスペースに単独で置かれた「🧩 関数を定義」ブロック）を収集する
+  const procBlocks = workspace.getTopBlocks(true).filter(b => b.type === 'action_define_procedure');
+  const procNames = new Set();
+  const procedures = {};
+  for (const pb of procBlocks) {
+    const pname = (pb.getFieldValue('NAME') || '').trim();
+    if (!pname) {
+      throw new Error('関数ブロックの名前が空です。');
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(pname)) {
+      throw new Error('関数名「' + pname + '」が不正です。英字かアンダースコアで始まり、英数字とアンダースコアのみ、32文字以内にしてください。');
+    }
+    if (procNames.has(pname)) {
+      throw new Error('関数名「' + pname + '」が複数のブロックで重複しています。');
+    }
+    procNames.add(pname);
+    const body = actionStackToJson(pb.getInputTargetBlock('STACK'), 20);
+    if (body.length === 0) {
+      throw new Error('関数「' + pname + '」の中身が空です。実行したいアクションを入れてください。');
+    }
+    procedures[pname] = body;
+  }
+  if (Object.keys(procedures).length > 10) {
+    throw new Error('関数は最大10個までです。');
+  }
+
+  // call_procedure が参照している関数名が、実際に定義されているかを事前チェックする
+  function checkProcedureCalls(list) {
+    for (const a of list) {
+      if (a.type === 'call_procedure' && !procNames.has(a.name)) {
+        throw new Error('存在しない関数「' + a.name + '」を呼び出しています。「🧩 関数を定義」ブロックで先に定義してください。');
+      }
+      if (a.type === 'if') {
+        checkProcedureCalls(a.then || []);
+        checkProcedureCalls(a.else || []);
+      }
+    }
+  }
+  checkProcedureCalls(actions);
+  for (const body of Object.values(procedures)) checkProcedureCalls(body);
+
+  const name = (document.getElementById('scriptName').value || 'スクリプト').trim().slice(0, 50);
+
+  const out = { version: '1.2', name: name, trigger: trigger, actions: actions };
+  if (Object.keys(procedures).length > 0) out.procedures = procedures;
+  return out;
+}
+
+document.getElementById('btnDownload').addEventListener('click', () => {
+  let json;
+  try {
+    json = buildScriptJson();
+  } catch (e) {
+    showToast(e.message, true);
+    return;
+  }
+  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeName = json.name.replace(/[\\/:*?"<>|]/g, '_') || 'script';
+  a.href = url;
+  a.download = safeName + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('ダウンロードしました：' + safeName + '.json');
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (!confirm('ワークスペースをすべてクリアしますか？')) return;
+  workspace.clear();
+  const b = workspace.newBlock('trigger_on_message');
+  b.initSvg(); b.render();
+  b.moveBy(40, 40);
+  showToast('クリアしました');
+});
+
+// ══════════════════════════════════════════════
+// JSON → Blockly 復元（既存スクリプトの再編集用。旧バージョンのスクリプトもそのまま読み込める）
+// ══════════════════════════════════════════════
+const ACTION_JSON_TO_BLOCK = {
+  delay:        (a) => ({ type: 'action_delay', fields: { MS: a.ms ?? 1000 } }),
+  random_delay: (a) => ({ type: 'action_random_delay', fields: { MIN_MS: a.min_ms ?? 500, MAX_MS: a.max_ms ?? 2000 } }),
+  send_message: (a) => ({ type: 'action_send_message', fields: { CONTENT: a.content ?? '' } }),
+  reply:        (a) => ({ type: 'action_reply', fields: { CONTENT: a.content ?? '' } }),
+  random_message: (a) => ({ type: 'action_random_message', fields: { MESSAGES: (a.messages ?? ['']).join('|') } }),
+  send_embed:   (a) => ({ type: 'action_send_embed', fields: { TITLE: a.title ?? '', DESCRIPTION: a.description ?? '', COLOR: a.color ?? '4F46E5' } }),
+  send_dm:      (a) => ({ type: 'action_send_dm', fields: { CONTENT: a.content ?? '' } }),
+  send_to_channel: (a) => ({ type: 'action_send_to_channel', fields: { CHANNEL_ID: String(a.channel_id ?? ''), CONTENT: a.content ?? '' } }),
+  add_reaction: (a) => ({ type: 'action_add_reaction', fields: { EMOJI: a.emoji ?? '👍' } }),
+  add_multiple_reactions: (a) => ({ type: 'action_add_multiple_reactions', fields: { EMOJIS: (a.emojis ?? ['👍']).join(' ') } }),
+  remove_all_reactions: () => ({ type: 'action_remove_all_reactions', fields: {} }),
+  delete_message: () => ({ type: 'action_delete_message', fields: {} }),
+  pin_message:   () => ({ type: 'action_pin_message', fields: {} }),
+  unpin_message: () => ({ type: 'action_unpin_message', fields: {} }),
+  add_role:      (a) => ({ type: 'action_add_role', fields: { ROLE_ID: String(a.role_id ?? '') } }),
+  remove_role:   (a) => ({ type: 'action_remove_role', fields: { ROLE_ID: String(a.role_id ?? '') } }),
+  set_nickname:  (a) => ({ type: 'action_set_nickname', fields: { NICKNAME: a.nickname ?? '' } }),
+  create_thread: (a) => ({ type: 'action_create_thread', fields: { NAME: a.name ?? '' } }),
+  set_channel_topic: (a) => ({ type: 'action_set_channel_topic', fields: { TOPIC: a.topic ?? '' } }),
+  set_slowmode:  (a) => ({ type: 'action_set_slowmode', fields: { SECONDS: a.seconds ?? 5 } }),
+  move_voice_channel: (a) => ({ type: 'action_move_voice_channel', fields: { TARGET_CHANNEL_ID: String(a.target_channel_id ?? '') } }),
+  disconnect_voice:   () => ({ type: 'action_disconnect_voice', fields: {} }),
+  set_voice_mute:   (a) => ({ type: 'action_set_voice_mute', fields: { MUTE: a.mute ? 'true' : 'false' } }),
+  set_voice_deafen: (a) => ({ type: 'action_set_voice_deafen', fields: { DEAFEN: a.deafen ? 'true' : 'false' } }),
+  timeout:       (a) => ({ type: 'action_timeout', fields: { SECONDS: a.seconds ?? 60 } }),
+  remove_timeout:() => ({ type: 'action_remove_timeout', fields: {} }),
+  kick:          () => ({ type: 'action_kick', fields: {} }),
+  ban:           () => ({ type: 'action_ban', fields: {} }),
+  rickroll:      () => ({ type: 'action_rickroll', fields: {} }),
+  countdown:     (a) => ({ type: 'action_countdown', fields: { FROM: a.from ?? 3, FINAL_MESSAGE: a.final_message ?? '' } }),
+  random_reaction: () => ({ type: 'action_random_reaction', fields: {} }),
+  set_variable: (a) => ({ type: 'action_set_variable', fields: { NAME: a.name ?? 'myvar', VALUE: a.value ?? '' } }),
+  math: (a) => ({ type: 'action_math', fields: { TARGET: a.target ?? 'result', LEFT: a.left ?? '0', OP: a.op ?? '+', RIGHT: a.right ?? '0' } }),
+  json_get: (a) => ({ type: 'action_json_get', fields: { SOURCE: a.source ?? 'body', PATH: a.path ?? '', TARGET: a.target ?? 'result' } }),
+  call_procedure: (a) => ({ type: 'action_call_procedure', fields: { NAME: a.name ?? '' } }),
+  http_request: (a) => ({ type: 'action_http_request', fields: {
+    METHOD: a.method ?? 'GET',
+    URL: a.url ?? '',
+    HEADERS: (a.headers ?? []).map(h => (h.key ?? '') + ': ' + (h.value ?? '')).join('\n'),
+    BODY: a.body ?? '',
+    TIMEOUT: a.timeout_sec ?? 5,
+    STORE_STATUS: a.store_status ?? '',
+    STORE_BODY: a.store_body ?? '',
+  } }),
+};
+
+// アクションのJSON配列を、連結済みのBlocklyブロック列として組み立てる（先頭ブロックを返す）。
+// if の then/else にも同じ関数を再帰的に使う。
+function actionJsonArrayToChain(actionList) {
+  let first = null, prevConn = null;
+  for (const action of actionList) {
+    const b = actionJsonToBlock(action);
+    if (!b) continue;  // 未知のアクション種別はスキップ（将来バージョンとの前方互換のため落とさない）
+    if (!first) {
+      first = b;
+    } else {
+      prevConn.connect(b.previousConnection);
+    }
+    prevConn = b.nextConnection;
+  }
+  return first;
+}
+
+function actionJsonToBlock(action) {
+  if (action.type === 'if') {
+    const block = workspace.newBlock('action_if');
+    block.initSvg();
+    block.render();
+    const cond = action.condition || {};
+    block.setFieldValue(String(cond.left ?? ''), 'LEFT');
+    block.setFieldValue(cond.op || 'equals', 'OP');
+    block.setFieldValue(String(cond.right ?? ''), 'RIGHT');
+    const thenFirst = actionJsonArrayToChain(action.then || []);
+    if (thenFirst) block.getInput('THEN').connection.connect(thenFirst.previousConnection);
+    const elseFirst = actionJsonArrayToChain(action.else || []);
+    if (elseFirst) block.getInput('ELSE').connection.connect(elseFirst.previousConnection);
+    return block;
+  }
+  const mapper = ACTION_JSON_TO_BLOCK[action.type];
+  if (!mapper) return null;
+  const spec = mapper(action);
+  const block = workspace.newBlock(spec.type);
+  for (const [field, value] of Object.entries(spec.fields)) {
+    block.setFieldValue(String(value), field);
+  }
+  block.initSvg();
+  block.render();
+  return block;
+}
+
+function buildTriggerBlock(trigger) {
+  // trigger.type が未知/未指定の場合も「メッセージ受信」として安全にフォールバックする（後方互換）
+  const ttype = trigger.type || 'on_message';
+  let block;
+
+  if (ttype === 'on_member_join' || ttype === 'on_member_leave') {
+    block = workspace.newBlock(ttype === 'on_member_join' ? 'trigger_on_member_join' : 'trigger_on_member_leave');
+    block.initSvg(); block.render();
+    block.setFieldValue(String(trigger.channel_id ?? ''), 'CHANNEL_ID');
+    return block;
+  }
+
+  if (ttype === 'on_voice_join' || ttype === 'on_voice_leave') {
+    block = workspace.newBlock(ttype === 'on_voice_join' ? 'trigger_on_voice_join' : 'trigger_on_voice_leave');
+    block.initSvg(); block.render();
+    block.setFieldValue(String(trigger.channel_id ?? ''), 'CHANNEL_ID');
+    if (trigger.voice_channel_id) block.setFieldValue(String(trigger.voice_channel_id), 'VOICE_CHANNEL_ID');
+    return block;
+  }
+
+  // on_message / on_reaction_add / 不明タイプ → メッセージ受信 or リアクション追加として復元
+  block = workspace.newBlock(ttype === 'on_reaction_add' ? 'trigger_on_reaction_add' : 'trigger_on_message');
+  block.initSvg(); block.render();
+
+  const cond = trigger.condition || { type: 'any' };
+  block.setFieldValue(cond.type || 'any', 'COND_TYPE');
+  if (cond.value) block.setFieldValue(String(cond.value), 'COND_VALUE');
+  if (trigger.channel_id) block.setFieldValue(String(trigger.channel_id), 'CHANNEL_ID');
+  if (ttype === 'on_message' && trigger.react_to_bots) {
+    block.setFieldValue('TRUE', 'REACT_TO_BOTS');
+  }
+  return block;
+}
+
+function loadScriptJson(json) {
+  if (!json || typeof json !== 'object' || !json.trigger || !Array.isArray(json.actions)) {
+    throw new Error('このJSONは対応フォーマットではありません（trigger / actions が必要です）。');
+  }
+  workspace.clear();
+
+  document.getElementById('scriptName').value = json.name || 'スクリプト';
+
+  const trigger = buildTriggerBlock(json.trigger);
+  trigger.moveBy(40, 40);
+
+  const actionsFirst = actionJsonArrayToChain(json.actions);
+  if (actionsFirst) {
+    trigger.getInput('ACTIONS').connection.connect(actionsFirst.previousConnection);
+  }
+
+  // 関数（procedures）があれば、トリガーブロックの右側に「🧩 関数を定義」ブロックとして復元する
+  let procY = 40;
+  for (const [pname, pbody] of Object.entries(json.procedures || {})) {
+    const pb = workspace.newBlock('action_define_procedure');
+    pb.initSvg();
+    pb.render();
+    pb.setFieldValue(pname, 'NAME');
+    const bodyFirst = actionJsonArrayToChain(Array.isArray(pbody) ? pbody : []);
+    if (bodyFirst) pb.getInput('STACK').connection.connect(bodyFirst.previousConnection);
+    pb.moveBy(520, procY);
+    procY += 160;
+  }
+
+  Blockly.svgResize(workspace);
+}
+
+document.getElementById('btnLoad').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const json = JSON.parse(reader.result);
+      loadScriptJson(json);
+      showToast('読み込みました：' + file.name);
+    } catch (e) {
+      showToast('読み込みに失敗しました: ' + e.message, true);
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
+});
+
+window.addEventListener('resize', () => Blockly.svgResize(workspace));
+
+// ══════════════════════════════════════════════
+// モーダル共通の開閉処理
+// ══════════════════════════════════════════════
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function getSelectedBlock() {
+  try {
+    if (Blockly.common && typeof Blockly.common.getSelected === 'function') return Blockly.common.getSelected();
+  } catch (e) {}
+  return Blockly.selected || null;
+}
+
+// ══════════════════════════════════════════════
+// APIテストパネル（ブラウザから実際にfetchして試し打ちする）
+// ══════════════════════════════════════════════
+const apiTestLogHistory = [];
+
+document.getElementById('btnApiTest').addEventListener('click', () => openModal('apiTestOverlay'));
+document.getElementById('apiTestClose').addEventListener('click', () => closeModal('apiTestOverlay'));
+document.getElementById('apiTestOverlay').addEventListener('click', (e) => {
+  if (e.target.id === 'apiTestOverlay') closeModal('apiTestOverlay');
+});
+
+document.getElementById('apiTestLoadFromBlock').addEventListener('click', () => {
+  const b = getSelectedBlock();
+  if (!b || b.type !== 'action_http_request') {
+    showToast('「APIリクエスト」ブロックをワークスペース上でクリックして選択してから押してください。', true);
+    return;
+  }
+  document.getElementById('apiTestMethod').value = b.getFieldValue('METHOD') || 'GET';
+  document.getElementById('apiTestUrl').value = b.getFieldValue('URL') || '';
+  document.getElementById('apiTestHeaders').value = b.getFieldValue('HEADERS') || '';
+  document.getElementById('apiTestBody').value = b.getFieldValue('BODY') || '';
+  showToast('ブロックの内容を読み込みました（{var:...}などの差し込み変数はそのままの文字として送信されます）');
+});
+
+function renderApiLog() {
+  const el = document.getElementById('apiTestLog');
+  if (apiTestLogHistory.length === 0) {
+    el.innerHTML = '<div class="api-log-row" style="color:var(--text-dim)">まだ履歴はありません</div>';
+    return;
+  }
+  el.innerHTML = apiTestLogHistory.slice().reverse().map((entry) => {
+    const ok = entry.status >= 200 && entry.status < 400;
+    const statusText = entry.status >= 0 ? String(entry.status) : '失敗';
+    return '<div class="api-log-row"><span class="' + (ok ? 'status-ok' : 'status-ng') + '">' + statusText + '</span> '
+      + entry.method + ' ' + entry.url + ' <span style="color:var(--text-dim)">(' + entry.time + ')</span></div>';
+  }).join('');
+}
+
+async function sendApiTest() {
+  const method = document.getElementById('apiTestMethod').value;
+  const url = document.getElementById('apiTestUrl').value.trim();
+  if (!url) { showToast('URLを入力してください。', true); return; }
+  const headers = {};
+  parseHeaderLines(document.getElementById('apiTestHeaders').value).forEach(h => { headers[h.key] = h.value; });
+  const body = document.getElementById('apiTestBody').value;
+
+  const statusLabel = document.getElementById('apiTestStatusLabel');
+  const respBox = document.getElementById('apiTestResp');
+  statusLabel.textContent = '送信中…';
+  respBox.style.display = 'none';
+
+  const t0 = performance.now();
+  let statusCode = -1, respText = '';
+  try {
+    const opts = { method, headers };
+    if (method !== 'GET' && method !== 'DELETE' && body) opts.body = body;
+    const res = await fetch(url, opts);
+    statusCode = res.status;
+    respText = await res.text();
+  } catch (e) {
+    respText = '送信に失敗しました（CORSでブロックされたか、URLが間違っている可能性があります）: ' + e.message;
+  }
+  const ms = Math.round(performance.now() - t0);
+  statusLabel.textContent = (statusCode >= 0 ? ('ステータス: ' + statusCode) : '失敗') + '（' + ms + 'ms）';
+  respBox.style.display = 'block';
+  respBox.textContent = respText.slice(0, 5000) + (respText.length > 5000 ? '\n…(長いため省略しました)' : '');
+
+  apiTestLogHistory.push({ method, url, status: statusCode, time: new Date().toLocaleTimeString('ja-JP') });
+  if (apiTestLogHistory.length > 50) apiTestLogHistory.shift();
+  renderApiLog();
+}
+document.getElementById('apiTestSend').addEventListener('click', sendApiTest);
+
+// ══════════════════════════════════════════════
+// 簡易Discordシミュレーター
+// ══════════════════════════════════════════════
+document.getElementById('btnSimulator').addEventListener('click', () => openModal('simOverlay'));
+document.getElementById('simClose').addEventListener('click', () => closeModal('simOverlay'));
+document.getElementById('simOverlay').addEventListener('click', (e) => {
+  if (e.target.id === 'simOverlay') closeModal('simOverlay');
+});
+
+function simRenderTemplate(text, ctx) {
+  if (typeof text !== 'string' || !text) return text || '';
+  text = text.replace(/\{(mention|role|random|dice|var):([^{}]*)\}/g, (m, key, arg) => {
+    try {
+      if (key === 'mention') return /^\d+$/.test(arg.trim()) ? ('@ユーザー' + arg.trim()) : m;
+      if (key === 'role') return /^\d+$/.test(arg.trim()) ? ('@役職' + arg.trim()) : m;
+      if (key === 'random') {
+        const opts = arg.split('|').filter(Boolean);
+        return opts.length ? opts[Math.floor(Math.random() * opts.length)] : '';
+      }
+      if (key === 'dice') {
+        const sides = parseInt(arg.trim(), 10);
+        return (sides >= 2 && sides <= 1000) ? String(1 + Math.floor(Math.random() * sides)) : m;
+      }
+      if (key === 'var') return String(ctx.variables[arg.trim()] ?? '');
+    } catch (e) {}
+    return m;
+  });
+  const repl = {
+    '{user}': '@' + ctx.userName, '{user.name}': ctx.userName,
+    '{user.id}': '000000000000000000', '{user.tag}': ctx.userName + '#0001',
+    '{server}': 'テストサーバー', '{server.id}': '000000000000000000', '{member_count}': '123',
+    '{channel}': '#テストチャンネル', '{channel.name}': 'テストチャンネル',
+    '{message}': ctx.messageContent, '{message.content}': ctx.messageContent,
+  };
+  for (const k in repl) text = text.split(k).join(repl[k]);
+  return text;
+}
+
+function simEvalCondition(cond, ctx) {
+  const left  = simRenderTemplate(String(cond.left ?? ''), ctx);
+  const right = simRenderTemplate(String(cond.right ?? ''), ctx);
+  const op = cond.op || 'equals';
+  if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
+    const lf = parseFloat(left), rf = parseFloat(right);
+    if (isNaN(lf) || isNaN(rf)) return false;
+    if (op === 'gt') return lf > rf;
+    if (op === 'gte') return lf >= rf;
+    if (op === 'lt') return lf < rf;
+    if (op === 'lte') return lf <= rf;
+  }
+  if (op === 'equals') return left === right;
+  if (op === 'not_equals') return left !== right;
+  if (op === 'contains') return left.includes(right);
+  if (op === 'not_contains') return !left.includes(right);
+  if (op === 'startswith') return left.startsWith(right);
+  if (op === 'endswith') return left.endsWith(right);
+  return false;
+}
+
+function simJsonGetPath(data, path) {
+  let cur = data;
+  const parts = String(path || '').replace(/\[/g, '.').replace(/\]/g, '').split('.').filter(p => p !== '');
+  if (parts.length > 10) return null;
+  for (const p of parts) {
+    if (Array.isArray(cur)) {
+      const i = parseInt(p, 10);
+      cur = isNaN(i) ? undefined : cur[i];
+    } else if (cur && typeof cur === 'object') {
+      cur = cur[p];
+    } else {
+      return null;
+    }
+    if (cur === undefined) return null;
+  }
+  return cur;
+}
+
+function simAddChatLine(kind, who, text, badgeText) {
+  const chat = document.getElementById('simChat');
+  const div = document.createElement('div');
+  div.className = 'sim-msg ' + kind;
+  const avatarLetter = (who || '?').slice(0, 1).toUpperCase();
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = avatarLetter;
+  const col = document.createElement('div');
+  const whoSpan = document.createElement('span');
+  whoSpan.className = 'who';
+  whoSpan.textContent = who;
+  col.appendChild(whoSpan);
+  if (text) {
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    col.appendChild(b);
+  }
+  if (badgeText) {
+    const bg = document.createElement('div');
+    bg.className = 'badge';
+    bg.textContent = badgeText;
+    col.appendChild(bg);
+  }
+  div.appendChild(avatar);
+  div.appendChild(col);
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function simUpdateVarsPanel(ctx) {
+  const el = document.getElementById('simVars');
+  const entries = Object.entries(ctx.variables);
+  el.textContent = entries.length === 0 ? '' : ('変数: ' + entries.map(([k, v]) => k + '=' + String(v).slice(0, 40)).join(' / '));
+}
+
+const SIM_MAX_ACTIONS_PER_RUN = 150;
+const SIM_MAX_DEPTH = 6;
+const SIM_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+
+async function simRunActionList(actions, ctx, depth) {
+  if (depth > SIM_MAX_DEPTH) { simAddChatLine('bot', 'システム', null, 'ネストが深すぎるため停止しました'); return; }
+  for (const action of actions) {
+    if (ctx.actionsRun >= SIM_MAX_ACTIONS_PER_RUN) { simAddChatLine('bot', 'システム', null, '実行数の上限に達したため停止しました'); return; }
+    ctx.actionsRun++;
+    await simRunAction(action, ctx, depth);
+  }
+}
+
+async function simRunAction(action, ctx, depth) {
+  const t = action.type;
+  const render = (s) => simRenderTemplate(s, ctx);
+  if (t === 'send_message' || t === 'reply' || t === 'send_dm' || t === 'send_to_channel') {
+    simAddChatLine('bot', 'Bot', render(action.content || '').slice(0, 2000));
+  } else if (t === 'send_embed') {
+    const title = action.title ? render(action.title) : '';
+    const desc  = action.description ? render(action.description) : '';
+    simAddChatLine('bot', 'Bot', '[Embed] ' + (title ? ('**' + title + '**\n') : '') + desc);
+  } else if (t === 'random_message') {
+    const msgs = action.messages || [];
+    if (msgs.length) simAddChatLine('bot', 'Bot', render(msgs[Math.floor(Math.random() * msgs.length)]));
+  } else if (t === 'add_reaction') {
+    simAddChatLine('bot', 'Bot', null, 'リアクション: ' + action.emoji);
+  } else if (t === 'add_multiple_reactions') {
+    simAddChatLine('bot', 'Bot', null, 'リアクション: ' + (action.emojis || []).join(' '));
+  } else if (t === 'random_reaction') {
+    simAddChatLine('bot', 'Bot', null, 'ランダムリアクション');
+  } else if (t === 'set_variable') {
+    if (SIM_VAR_NAME_RE.test(action.name || '')) ctx.variables[action.name] = render(String(action.value ?? ''));
+  } else if (t === 'math') {
+    const lf = parseFloat(render(String(action.left ?? '0')));
+    const rf = parseFloat(render(String(action.right ?? '0')));
+    let result = 0;
+    if (!isNaN(lf) && !isNaN(rf)) {
+      if (action.op === '+') result = lf + rf;
+      else if (action.op === '-') result = lf - rf;
+      else if (action.op === '*') result = lf * rf;
+      else if (action.op === '/') result = rf !== 0 ? lf / rf : 0;
+      else if (action.op === '%') result = rf !== 0 ? lf % rf : 0;
+      else if (action.op === 'min') result = Math.min(lf, rf);
+      else if (action.op === 'max') result = Math.max(lf, rf);
+    }
+    if (SIM_VAR_NAME_RE.test(action.target || '')) {
+      ctx.variables[action.target] = Number.isInteger(result) ? String(result) : String(Math.round(result * 1e6) / 1e6);
+    }
+  } else if (t === 'json_get') {
+    let parsed = null;
+    try { parsed = JSON.parse(ctx.variables[action.source] ?? ''); } catch (e) {}
+    const value = parsed !== null ? simJsonGetPath(parsed, action.path || '') : null;
+    let resultStr = '';
+    if (value !== null && value !== undefined) resultStr = (typeof value === 'object') ? JSON.stringify(value) : String(value);
+    if (SIM_VAR_NAME_RE.test(action.target || '')) ctx.variables[action.target] = resultStr;
+  } else if (t === 'if') {
+    const ok = simEvalCondition(action.condition || {}, ctx);
+    const branch = ok ? action.then : action.else;
+    if (branch) await simRunActionList(branch, ctx, depth + 1);
+  } else if (t === 'call_procedure') {
+    const proc = ctx.procedures[action.name];
+    if (proc && depth + 1 <= SIM_MAX_DEPTH) await simRunActionList(proc, ctx, depth + 1);
+    else simAddChatLine('bot', 'システム', null, '関数「' + action.name + '」が見つかりません');
+  } else if (t === 'http_request') {
+    const url = render(action.url || '');
+    const realHttp = document.getElementById('simRealHttp').checked;
+    if (!realHttp) {
+      simAddChatLine('bot', 'システム', null, '🌐 ' + action.method + ' ' + url + '（シミュレーターでは未送信。実際のBotでは送信されます）');
+      if (action.store_status) ctx.variables[action.store_status] = '200';
+      if (action.store_body) ctx.variables[action.store_body] = '';
+    } else {
+      const headers = {};
+      (action.headers || []).forEach(h => { headers[render(h.key)] = render(h.value); });
+      let statusVal = '-1', bodyVal = '';
+      try {
+        const opts = { method: action.method, headers };
+        if (action.body) opts.body = render(action.body);
+        const res = await fetch(url, opts);
+        statusVal = String(res.status);
+        bodyVal = (await res.text()).slice(0, 4000);
+      } catch (e) {
+        bodyVal = '(送信に失敗しました: ' + e.message + ')';
+      }
+      simAddChatLine('bot', 'システム', null, '🌐 ' + action.method + ' ' + url + ' → ' + statusVal);
+      if (action.store_status) ctx.variables[action.store_status] = statusVal;
+      if (action.store_body) ctx.variables[action.store_body] = bodyVal;
+    }
+  } else if (t === 'delay' || t === 'random_delay') {
+    // シミュレーターではテストを素早く終えるため実際には待機しない
+  } else {
+    simAddChatLine('bot', 'システム', null, '🔧 ' + t + '（この効果はシミュレーターでは再現されません）');
+  }
+  simUpdateVarsPanel(ctx);
+}
+
+async function simHandleSend() {
+  const input = document.getElementById('simInput');
+  const text = input.value;
+  if (!text.trim()) return;
+  const fromName = document.getElementById('simFromName').value || 'テストユーザー';
+  simAddChatLine('user', fromName, text);
+  input.value = '';
+
+  let json;
+  try {
+    json = buildScriptJson();
+  } catch (e) {
+    simAddChatLine('bot', 'システム', null, 'スクリプトを読み取れません: ' + e.message);
+    return;
+  }
+  if (json.trigger.type !== 'on_message') {
+    simAddChatLine('bot', 'システム', null,
+      '現在のトリガーは「' + json.trigger.type + '」です。シミュレーターはメッセージ受信（on_message）のみ対応しています。');
+    return;
+  }
+  const cond = json.trigger.condition || { type: 'any' };
+  let matched = true;
+  if (cond.type === 'equals') matched = text === cond.value;
+  else if (cond.type === 'contains') matched = text.includes(cond.value);
+  else if (cond.type === 'startswith') matched = text.startsWith(cond.value);
+  else if (cond.type === 'endswith') matched = text.endsWith(cond.value);
+  if (!matched) {
+    simAddChatLine('bot', 'システム', null, '条件に一致しなかったため反応しません');
+    return;
+  }
+
+  const ctx = { variables: {}, procedures: json.procedures || {}, actionsRun: 0, userName: fromName, messageContent: text };
+  await simRunActionList(json.actions, ctx, 0);
+}
+document.getElementById('simSend').addEventListener('click', simHandleSend);
+document.getElementById('simInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') simHandleSend(); });
+</script>
+</body>
+</html>
