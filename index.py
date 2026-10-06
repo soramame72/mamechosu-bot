@@ -1,6 +1,5 @@
 """
-index.py - Discord Bot メインスクリプト
-Python 3.10 + discord.py 2.3.2
+腰痛に効くわぁ～
 """
 
 import discord
@@ -6631,9 +6630,9 @@ SECRET_RICK_URL = "http://mamechosu.cloudfree.jp/dc/5655/cdn/gif/rick.gif"
 SECRET_OBAMA_FALLBACK = ["おばまです", "オバマなのだ…", "…オバマ"]
 
 SECRET_NICKNAMES = [
-    "ちんちくりん", "変態さん", "おばかさん", "むしさん", "ぷにぷに星人",
-    "ぺろぺろキャンディ", "ぶーぶー豚さん", "みそしるおばけ", "でろでろスライム",
-    "名無しの権兵衛", "自称天才", "おこちゃま", "貧弱ちゃん", "ぽんこつロボ",
+    "30分睡眠ユーザー", "変態さん", "堀井大輔", "高須幹也", "ＧＡＹ",
+    "ざぁ～こ♡", "ｽﾋﾟｷﾃﾞﾙｼﾞﾊﾞｾﾞﾖ!!", "高市早苗", "次期増税メガネ候補",
+    "Edward Trout", "自称天才", "おこちゃま", "貧乳ちゃん", "ぽんこつロボ", "やじゅ", "先輩",
 ]
 
 SECRET_CONFESS_TEMPLATES = [
@@ -6693,6 +6692,7 @@ SECRET_SENRYU_FALLBACK_PARTS = [
     ["夕焼けに", "溶けてゆく日々", "惜しみけり"],
     ["風薫る", "五月の空に", "夢のせて"],
     ["満員の", "電車の中で", "夢を見る"],
+    ["しきみたり", "はなぴしこうく", "ばかぴいし"],
 ]
 
 async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
