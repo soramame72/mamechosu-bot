@@ -236,7 +236,7 @@ async def _confirm_delete(msg, max_attempts: int = 4) -> bool:
             if attempt == max_attempts - 1:
                 db_log("temp_message_delete_failed", f"channel={msg.channel.id} msg={msg.id} | {e}", level="WARN")
                 return False
-            await asyncio.sleep(1.6 * (attempt + 1))
+            await asyncio.sleep(1.5 * (attempt + 1))
     return False
 
 async def _delayed_confirmed_delete(msg, delay: float):
@@ -295,7 +295,7 @@ async def cleanup_removed_guilds():
     db_log("cleanup_removed_guilds", f"deleted={to_delete}")
 
 # ──────────────────────────────────────────────
-# Groq レートリミット自動更新（meigen等を打たなくても定期的に取得）
+# Groq レートリミット自動更新
 # ──────────────────────────────────────────────
 async def _refresh_groq_ratelimit():
     api_key = GROQ_API_KEY or AICHAT_API_KEY
@@ -446,9 +446,6 @@ async def task_save_vc_rankings():
             db_write("vcranking", data, guild_id=guild_id)
 
 # ──────────────────────────────────────────────
-
-# ──────────────────────────────────────────────
-# ──────────────────────────────────────────────
 # on_ready
 # ──────────────────────────────────────────────
 JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -565,7 +562,6 @@ async def on_ready():
         return
     bot._did_initial_setup = True
 
-    # 旧バージョンの /akeomeset が書き込んでいた誤ったグローバルストアからの一回限りの移行
     _legacy_akeome = db_read("akeome", guild_id="global")
     if isinstance(_legacy_akeome, dict) and _legacy_akeome:
         migrated = 0
@@ -622,6 +618,9 @@ async def on_ready():
     try:
         task_cleanup_miq_cards.start()
     except: pass
+    try:
+        task_cleanup_temproles.start()
+    except: pass
 
     try:
         bot.add_view(GlobalChatTosView())
@@ -654,7 +653,6 @@ async def on_ready():
         if count > 0:
             print(f"AIチャット {count} 件を自動復旧しました")
 
-    # ステータスを ver1.6 固定で設定
     await bot.change_presence(
         activity=discord.CustomActivity(name="ver1.6"))
 
@@ -828,19 +826,6 @@ HELP_TEXT = {
         "- コマンドを実行したチャンネル以外でも、同じサーバー内でBotが閲覧できるチャンネルであれば検索して反応できます（サーバーをまたぐことはできません）\n"
         "- Botが対象のobamaサーバーに在籍している必要があります"
     ),
-    "haiku": (
-        "**五・七・五（俳句/川柳）自動検出のON/OFFを設定します。**\n"
-        "使い方: `/haiku scope:[channel/server] state:[ON/OFF] channel:[チャンネル]`\n"
-        "**仕様:**\n"
-        "- メッセージが五・七・五のリズムを持つ場合、和紙風画像を生成して送信\n"
-        "- 長い文章に埋め込まれた五・七・五も検出可能（例:「昨日食べたラーメン美味しかったけど古池や蛙飛び込む水の音でびっくりした」）\n"
-        "- ±1モーラの字余り・字足らずまで許容\n"
-        "- メンション・チャンネルリンク・URL・カスタム絵文字を含むメッセージや、日本語の割合が低いメッセージは検出対象外\n"
-        "- ネタバレ（`||...||`）で書かれたメッセージから検出した場合、生成される画像もネタバレ状態（ぼかし表示）で送信されます\n"
-        "- `scope:channel` で特定チャンネルのみ有効化\n"
-        "- `scope:server` でサーバー全体で有効化\n"
-        "必要権限: チャンネル管理権限"
-    ),
     "resource": (
         "**Botのシステムリソース状況を表示します。**\n"
         "使い方: `/resource`\n"
@@ -951,7 +936,7 @@ HELP_TEXT = {
         "**サーバー独自のGroq APIキーを設定します（管理者専用）。**\n"
         "使い方: `/apikey api_key:[Groq APIキー]`\n"
         "**仕様:**\n"
-        "- 設定すると、このサーバーのAI機能（川柳検出・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてがそのキーを使用します。AIチャット専用ではありません。\n"
+        "- 設定すると、このサーバーのAI機能（ローマ字翻訳・meigen・sakubun・AIチャット等）すべてがそのキーを使用します。AIチャット専用ではありません。\n"
         "- 空で実行するとカスタムキーを削除してデフォルトに戻す\n"
         "- Groq APIキーは https://console.groq.com/ で無料発行可能\n"
         "必要権限: サーバー管理権限"
@@ -1056,6 +1041,14 @@ HELP_TEXT = {
         "- Botが使用できない絵文字が含まれる場合は編集後に警告を表示\n"
         "必要権限: ロール管理権限（`/rolepanel` と同じ）"
     ),
+    "rolepanelinfo": (
+        "**指定したロールパネルの設定内容を表示します。**\n"
+        "使い方: `/rolepanelinfo message_id:[メッセージID] plain:[True/False]`\n"
+        "**仕様:**\n"
+        "- チャンネル・サブタイトル・パスワード保護の有無・絵文字とロールの対応を一覧表示\n"
+        "- `plain:True` にすると、絵文字とロールの対応を `/rolepaneledit` の `roles_and_emojis` にそのまま貼り付けられるプレーンテキストでも表示します\n"
+        "必要権限: ロール管理権限（`/rolepanel` と同じ）"
+    ),
     "miq": (
         "**メッセージを名言風の画像カード（\"Make it a quote\"）に変換します。**\n"
         "使い方（スラッシュコマンドではありません）:\n"
@@ -1084,6 +1077,37 @@ HELP_TEXT = {
         "- Groq AI（openai/gpt-oss-120b）が該当発言を選出\n"
         "- 選出結果は画像カードとメッセージリンク付きで送信\n"
         "- Groq APIが利用不可な場合はランダムフォールバック"
+    ),
+    "suggest": (
+        "**直近の会話の流れをAIが読んで、話題の整理・中心メンバー・要点・次の返信案を出します。**\n"
+        "使い方: `/suggest count:[件数]`\n"
+        "**オプション:**\n"
+        "- `count` : さかのぼって読む直近メッセージ数（省略時20、5〜80）\n"
+        "**仕様:**\n"
+        "- 実行したチャンネルの直近の会話ログ（発言者名・内容）をGroq AIに渡し、以下をまとめます\n"
+        "  - 🗒 今の話題の要約\n"
+        "  - 👥 発言数や話題提起の様子から見た中心メンバー（最大4人・理由付き）\n"
+        "  - 📌 押さえておくべき要点（最大5個）\n"
+        "  - 返信案（最大3つ、話題・雰囲気・口調を踏まえたもの）\n"
+        "- 結果は実行者にだけ見える形（ephemeral）で表示され、他の人には見えません\n"
+        "- 他Botの発言は参考元から除外されます（なりすまし等のWebhook経由の発言は含まれます）\n"
+        "- Groq APIキーの設定が必要です（`/apikey`）"
+    ),
+    "temprole": (
+        "**メンション用の一時的なロールを作成・削除・一覧表示・パネル表示します。**\n"
+        "使い方: `/temprole action:[create/delete/list/panel/settings] name:[名前] days:[日数] color:[色] role:[対象ロール] state:[ON/OFF]`\n"
+        "**仕様:**\n"
+        "- この機能自体は既定で **OFF** です。「ロールの管理」権限を持つ人が `/temprole action:settings state:ON` でサーバーごとに有効化する必要があります（`settings` を権限なしで実行すると現在の状態だけ確認できます）\n"
+        "- 有効化されていれば、作成（`action:create`）自体には特別な権限は不要です（誰でも作成できます）\n"
+        "- サーバーごとに同時に最大5個まで（期限切れ・手動削除された分は数に含まれません）\n"
+        "- 作成されるロールは権限を一切持たない「メンション専用」ロールです（メンション可能設定済み）\n"
+        "- 有効期限（`days`）は作成時に必須・1〜7日の範囲で指定し、期限が来ると自動的に削除されます\n"
+        "- `color` は16進数カラーコード（例: `FF0000`）、省略した場合は既定の色になります\n"
+        "- 作成すると、そのチャンネルに簡易ロールパネル（名前・色はロールと同じ、サブタイトルは作成者表示）が自動設置され、"
+        "🔔 のリアクションでロールの付与/解除ができます\n"
+        "- `action:panel role:[対象ロール]` で、既存の一時ロールのパネルを今のチャンネルに改めて表示できます\n"
+        "- 削除（`action:delete`）は、作成した本人か「ロールの管理」権限を持つ人のみ行えます\n"
+        "- `action:list` で現在のサーバーの一時ロール一覧と期限を確認できます"
     ),
     "sakubun": (
         "**指定したテーマと文字数でAIが作文を書き、原稿用紙画像として出力します。**\n"
@@ -1700,7 +1724,7 @@ class _CPNavButton(discord.ui.Button):
             embed=self._view_ref._make_embed(), view=self._view_ref)
 
 class _ToggleButton(discord.ui.Button):
-    """川柳検出等、各種お楽しみ機能のON/OFFボタン"""
+    """各種お楽しみ機能のON/OFFボタン"""
     def __init__(self, *, label, style, row, guild_id, feature, scope, on):
         super().__init__(label=label, style=style, row=row)
         self.guild_id = guild_id; self.feature = feature
@@ -1718,9 +1742,7 @@ class _ToggleButton(discord.ui.Button):
             gd["channels"] = chs
         db_write(self.feature, gd, guild_id=self.guild_id)
         scope_txt = "サーバー全体" if self.scope == "server" else "このチャンネル"
-        if self.feature == "haiku":
-            feat_txt = "川柳検出"
-        elif self.feature == "romaji":
+        if self.feature == "romaji":
             feat_txt = "ローマ字翻訳"
         elif self.feature == "impersonate":
             feat_txt = "なりすまし機能"
@@ -1802,13 +1824,11 @@ class _BtnSettings(discord.ui.Button):
     async def callback(self, i):
         wd = db_read("welcome",  guild_id=self.gid)
         gd = db_read("goodbye",  guild_id=self.gid)
-        hk = db_read("haiku",    guild_id=self.gid)
         wch = wd.get("channel"); fch = gd.get("channel")
         ai_chats = sum(1 for cid in getattr(bot, "_active_chats", {}) if i.guild.get_channel(cid))
         lines = [
             f"歓迎ch: {i.guild.get_channel(wch).mention if wch and i.guild.get_channel(wch) else '未設定'}",
             f"送別ch: {i.guild.get_channel(fch).mention if fch and i.guild.get_channel(fch) else '未設定'}",
-            f"川柳検出ch: {len(hk.get('channels',[]))}件" + (" +全体" if hk.get("server") else ""),
             f"AI会話稼働ch: {ai_chats}件",
         ]
         embed = discord.Embed(title="現在の設定一覧", description="\n".join(lines), color=0x5865F2)
@@ -2013,7 +2033,6 @@ class _BtnCPHelp(discord.ui.Button):
             "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
             "**主な機能**:\n"
             "- **メッセージ**: 参加・退出メッセージの設定\n"
-            "- **川柳検出**: 川柳検出機能のON/OFF\n"
             "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
             "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
             "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
@@ -2021,16 +2040,15 @@ class _BtnCPHelp(discord.ui.Button):
         )
         await i.response.send_message(text, ephemeral=True)
 
-# ── CPView (5ページ構成) ──────────────────────
+# ── CPView (4ページ構成) ──────────────────────
 class CPView(discord.ui.View):
     PAGE_TITLES = [
         "メッセージ管理",
-        "川柳 ON/OFF",
         "ローマ字翻訳 / なりすまし ON/OFF",
         "サーバー情報・バックアップ / パネル作成",
         "AIチャット ON/OFF",
     ]
-    MAX_PAGE = 4
+    MAX_PAGE = 3
 
     def __init__(self, guild_id: int, channel_id: int, page: int = 0):
         super().__init__(timeout=300)
@@ -2059,19 +2077,7 @@ class CPView(discord.ui.View):
             self.add_item(_BtnCPHelp())
 
         elif p == 1:
-            # ページ2: 川柳 ON/OFF (このch / 全体)
-            specs = [
-                ("川柳 ON  (このch)", "haiku", "channel", True,  discord.ButtonStyle.success, 0),
-                ("川柳 OFF (このch)", "haiku", "channel", False, discord.ButtonStyle.danger,  0),
-                ("川柳 ON  (全体)",   "haiku", "server",  True,  discord.ButtonStyle.success, 1),
-                ("川柳 OFF (全体)",   "haiku", "server",  False, discord.ButtonStyle.danger,  1),
-            ]
-            for label, feat, scope, on, style, row in specs:
-                self.add_item(_ToggleButton(label=label, style=style, row=row,
-                                            guild_id=gid, feature=feat, scope=scope, on=on))
-
-        elif p == 2:
-            # ページ3: ローマ字翻訳 / なりすまし / あけおめ ON/OFF
+            # ページ2: ローマ字翻訳 / なりすまし / あけおめ ON/OFF
             specs = [
                 ("ローマ字 ON  (このch)", "romaji", "channel", True,  discord.ButtonStyle.success, 0),
                 ("ローマ字 OFF (このch)", "romaji", "channel", False, discord.ButtonStyle.danger,  0),
@@ -2088,8 +2094,8 @@ class CPView(discord.ui.View):
             self.add_item(_BtnSetImpersonateChance(gid))
             self.add_item(_BtnImpersonateLog(gid))
 
-        elif p == 3:
-            # ページ4: サーバー情報・バックアップ / パネル作成
+        elif p == 2:
+            # ページ3: サーバー情報・バックアップ / パネル作成
             self.add_item(_BtnResource());         self.add_item(_BtnPermission())
             self.add_item(_BtnBackup(gid));        self.add_item(_BtnSettings(gid))
             ch = bot.get_channel(cid)
@@ -2101,8 +2107,8 @@ class CPView(discord.ui.View):
             if ch:
                 self.add_item(_BtnPurge(ch))
         
-        elif p == 4:
-            # ページ5: AIチャット ON/OFF
+        elif p == 3:
+            # ページ4: AIチャット ON/OFF
             self.add_item(_BtnStartAIChat(gid, cid))
             self.add_item(_BtnStopAIChat(gid, cid))
             self.add_item(_BtnSetAICustomKey(gid))
@@ -2133,7 +2139,6 @@ async def cmd_cp_help(interaction: discord.Interaction):
         "`/cp` コマンドを実行すると、サーバーの各種機能を設定できるパネルが表示されます。\n\n"
         "**主な機能**:\n"
         "- **メッセージ**: 参加・退出メッセージの設定\n"
-        "- **川柳検出**: 川柳検出機能のON/OFF\n"
         "- **ローマ字翻訳 / なりすまし**: ローマ字の自動翻訳、なりすまし機能のON/OFFやバレ確率の設定\n"
         "- **サーバー情報等**: バックアップ、ロールパネル作成など\n"
         "- **AIチャット**: チャンネル指定でAIと会話する機能\n\n"
@@ -2321,6 +2326,53 @@ async def cmd_rolepaneledit(interaction: discord.Interaction, message_id: str, r
     warning = _rolepanel_failed_warning(failed)
     if color_invalid: warning += "\n⚠️ 指定された色の形式が無効なため、色は変更されませんでした。"
     await interaction.followup.send("ロールパネルを編集しました。" + warning, ephemeral=True)
+
+@bot.tree.command(name="rolepanelinfo", description="指定したロールパネルの設定内容を表示します")
+@app_commands.describe(message_id="対象パネルのメッセージID",
+                        plain="絵文字とロールの対応を、/rolepaneledit にそのまま貼り付けられるプレーンテキストでも表示する")
+async def cmd_rolepanelinfo(interaction: discord.Interaction, message_id: str, plain: bool = False):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.followup.send("ロール管理権限が必要です。", ephemeral=True)
+        return
+    try:
+        mid = int(message_id.strip())
+    except ValueError:
+        await interaction.followup.send("メッセージIDは数字で指定してください。", ephemeral=True)
+        return
+
+    panel_data, channel, msg, err = await _resolve_rolepanel(interaction.guild, mid, interaction.channel_id)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
+        return
+
+    mapping = panel_data.get("roles", {})
+    lines = []
+    for emoji_str, role_id in mapping.items():
+        role = interaction.guild.get_role(role_id)
+        role_txt = role.mention if role else f"（削除済みロール ID:{role_id}）"
+        lines.append(f"{emoji_str} → {role_txt}")
+
+    color_val = panel_data.get("color")
+    embed = discord.Embed(
+        title=f"ロールパネル設定: {panel_data.get('title', 'ロールパネル')}",
+        color=color_val if color_val is not None else 0x5865F2,
+    )
+    embed.add_field(name="チャンネル", value=channel.mention if channel else "不明（取得できませんでした）", inline=True)
+    embed.add_field(name="メッセージID", value=str(mid), inline=True)
+    embed.add_field(name="パスワード保護", value="あり" if panel_data.get("password") else "なし", inline=True)
+    embed.add_field(name="サブタイトル", value=panel_data.get("subtitle") or "（なし）", inline=False)
+    embed.add_field(name="絵文字 → ロール一覧", value=("\n".join(lines) or "（なし）")[:1000], inline=False)
+
+    if plain:
+        plain_text = ", ".join(f"{emoji_str}:<@&{role_id}>" for emoji_str, role_id in mapping.items())
+        embed.add_field(
+            name="プレーンテキスト（/rolepaneledit の roles_and_emojis にそのまま使えます）",
+            value=(f"```{plain_text}```" if plain_text else "（なし）")[:1024],
+            inline=False,
+        )
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ──────────────────────────────────────────────
 # 6. 歓迎・送別メッセージ
@@ -2756,7 +2808,7 @@ async def _process_fake_interaction(message):
     return True
 
 # ──────────────────────────────────────────────
-# on_message (禁止ワード / 自動返信 / 川柳 / グローバルチャット)
+# on_message (グローバルチャット等)
 # ──────────────────────────────────────────────
 @bot.event
 async def on_message(message: discord.Message):
@@ -2866,11 +2918,6 @@ async def on_message(message: discord.Message):
                 translated = await _groq_translate_romaji(text, api_key)
                 if translated:
                     await message.reply(f"[翻訳]: {translated}")
-
-    # 川柳検出 (デフォルトON)
-    hk_data = db_read("haiku", guild_id=message.guild.id)
-    if hk_data.get("server", True) or message.channel.id in hk_data.get("channels", []):
-        await check_haiku(message)
 
     # グローバルチャット
     await relay_global_message(message)
@@ -4117,138 +4164,8 @@ async def cmd_letterreact(interaction: discord.Interaction, message_id: str, tex
 
 
 # ──────────────────────────────────────────────
-# 11. 川柳検出
+# sakubun（AI作文）/ フォント・縦書きユーティリティ
 # ──────────────────────────────────────────────
-KANJI_YOMI: dict[str, str] = {
-    "日":"ひ","月":"つき","山":"やま","川":"かわ","花":"はな","風":"かぜ","雨":"あめ",
-    "雪":"ゆき","空":"そら","海":"うみ","木":"き","春":"はる","夏":"なつ","秋":"あき",
-    "冬":"ふゆ","人":"ひと","心":"こころ","夢":"ゆめ","時":"とき","道":"みち",
-    "光":"ひかり","影":"かげ","声":"こえ","手":"て","目":"め","耳":"みみ",
-    "水":"みず","火":"ひ","土":"つち","草":"くさ","鳥":"とり","星":"ほし",
-    "夜":"よる","朝":"あさ","昼":"ひる","今":"いま","子":"こ","父":"ちち","母":"はは",
-    "家":"いえ","町":"まち","村":"むら","友":"とも","愛":"あい","涙":"なみだ",
-    "笑":"わら","泣":"な","走":"はし","飛":"と","咲":"さ","散":"ち","落":"お",
-    "白":"しろ","黒":"くろ","赤":"あか","青":"あお","緑":"みどり","桜":"さくら",
-    "梅":"うめ","竹":"たけ","松":"まつ","葉":"は","森":"もり","野":"の","池":"いけ",
-    "波":"なみ","岩":"いわ","石":"いし","霧":"きり","雪":"ゆき","虹":"にじ",
-    "香":"かお","命":"いのち","神":"かみ","静":"しず","深":"ふか","遠":"とお",
-    "大":"おお","小":"ちい","長":"なが","新":"あたら","古":"ふる",
-    # 動詞・形容詞系
-    "見":"み","聞":"き","言":"い","思":"おも","知":"し","来":"く","行":"い",
-    "出":"で","入":"はい","立":"た","起":"お","寝":"ね","食":"た","飲":"の",
-    "書":"か","読":"よ","歩":"あゆ","走":"はし","泳":"およ","飛":"と",
-    "降":"ふ","照":"て","吹":"ふ","流":"なが","咲":"さ","散":"ち","落":"お",
-    "揺":"ゆ","輝":"かがや","静":"しず","深":"ふか","遠":"とお","近":"ちか",
-    "高":"たか","低":"ひく","速":"はや","遅":"おそ","明":"あか","暗":"くら",
-    "熱":"あつ","冷":"つめ","甘":"あま","苦":"にが","辛":"から","酸":"す",
-    # 場所・自然
-    "丘":"おか","谷":"たに","峰":"みね","崖":"がけ","浜":"はま","沖":"おき",
-    "湖":"みずうみ","滝":"たき","泉":"いずみ","砂":"すな","土":"つち",
-    "石":"いし","岩":"いわ","霧":"きり","霜":"しも","露":"つゆ","虹":"にじ",
-    "雷":"かみなり","嵐":"あらし","霞":"かすみ","煙":"けむり","炎":"ほのお",
-    # 季語・風物詩
-    "花":"はな","桜":"さくら","梅":"うめ","菊":"きく","蓮":"はす",
-    "竹":"たけ","松":"まつ","杉":"すぎ","橡":"とち","柳":"やなぎ",
-    "蝶":"ちょう","蛍":"ほたる","蝉":"せみ","鈴虫":"すずむし",
-    "鴨":"かも","雀":"すずめ","鶯":"うぐいす","燕":"つばめ","鷹":"たか",
-    "蛙":"かえる","蛇":"へび","亀":"かめ","魚":"さかな","蟹":"かに",
-    # 人・心・時間
-    "命":"いのち","魂":"たましい","心":"こころ","夢":"ゆめ","愛":"あい",
-    "恋":"こい","涙":"なみだ","笑":"わら","泣":"な","祈":"いの",
-    "願":"ねが","誓":"ちか","忘":"わす","想":"おも","恋":"こい",
-    "旅":"たび","別":"わか","逢":"あ","待":"ま","惜":"お",
-    "昨":"きのう","今":"いま","明":"あす","朝":"あさ","昼":"ひる",
-    "夕":"ゆう","夜":"よる","宵":"よい","暁":"あかつき","晩":"ばん",
-    "春":"はる","夏":"なつ","秋":"あき","冬":"ふゆ","年":"とし",
-    "月":"つき","日":"ひ","時":"とき","刻":"とき","瞬":"またた",
-}
-
-def kanji_to_yomi(text: str) -> str:
-    result = []
-    for ch in text:
-        if ch in KANJI_YOMI:
-            result.append(KANJI_YOMI[ch])
-        elif "\u4e00" <= ch <= "\u9fff":
-            result.append("ああ")  # 未知漢字は平均2モーラとして扱う
-        else:
-            result.append(ch)
-    return "".join(result)
-
-def count_mora(text: str) -> int:
-    # 拗音（ゃゅょ）と、外来語小書き文字（ぁぃぅぇぉ）は直前の音と結合するため数えない。
-    # 促音「っ」と長音符「ー」はそれ自体で1モーラとして数えるべきなので、ここでは除外しない。
-    skip = set("ぁぃぅぇぉゃゅょァィゥェォャュョ")
-    count = 0
-    for ch in kanji_to_yomi(text):
-        if "\u3041" <= ch <= "\u3096" or "\u30A1" <= ch <= "\u30F6":
-            if ch not in skip:
-                count += 1
-        elif ch.isascii() and ch.isalpha():
-            count += 1
-    return count
-
-def _try_haiku_match(candidate: str) -> list[str] | None:
-    """候補文字列から5-7-5 or 5-5-7パターンを探す（±1字余り許容）"""
-    clean = re.sub(r"[\s　、。,.・/\n！!？?～~「」『』【】【】\(\)（）]", "", candidate)
-    if len(clean) < 5:
-        return None
-    n     = len(clean)
-    total = count_mora(clean)
-    if not (13 <= total <= 21):
-        return None
-    # 5-7-5 または 5-5-7 を ±1 で探索
-    for p1_target, p2_target, p3_target in [(5,7,5),(5,5,7)]:
-        for i in range(2, n - 2):
-            m1 = count_mora(clean[:i])
-            if not (p1_target - 1 <= m1 <= p1_target + 1):
-                continue
-            for j in range(i + 2, n):
-                m2 = count_mora(clean[i:j])
-                if m2 > p2_target + 2:
-                    break
-                if p2_target - 1 <= m2 <= p2_target + 1:
-                    m3 = count_mora(clean[j:])
-                    if p3_target - 1 <= m3 <= p3_target + 1:
-                        return [clean[:i], clean[i:j], clean[j:]]
-    return None
-
-def split_into_phrases(text: str) -> list[str] | None:
-    """
-    川柳/俳句の3フレーズを検出する。
-    - 長いメッセージの中からも探せる（文章をスライディングウィンドウで検索）
-    - 区切り文字で明示的に3分割されている場合を最優先
-    - 5-7-5 と 5-5-7 どちらも検出
-    - ±1字余り・字足らず許容
-    """
-    stripped = text.strip()
-    if stripped.startswith("http"):
-        return None
-    if len(stripped) < 5:
-        return None
-
-    # 1) 区切り文字で3分割できる場合（最優先）
-    parts = re.split(r"[\s　、。,.・/\n！!？?～~]+", stripped)
-    parts = [p for p in parts if p.strip()]
-    if len(parts) == 3:
-        moras = [count_mora(p) for p in parts]
-        targets = [(5,7,5),(5,5,7)]
-        for p1t,p2t,p3t in targets:
-            if (p1t-1 <= moras[0] <= p1t+1 and
-                p2t-1 <= moras[1] <= p2t+1 and
-                p3t-1 <= moras[2] <= p3t+1):
-                return parts
-
-    # 2) テキスト全体または文章中のウィンドウで探索
-    # 句読点・改行で文を分割してから各文を検索
-    sentences = re.split(r"[。\n！？!?]", stripped)
-    for sent in sentences:
-        result = _try_haiku_match(sent)
-        if result:
-            return result
-
-    # 3) 元のテキスト全体でも試す（句読点なしの場合）
-    return _try_haiku_match(stripped)
-
 # フォントキャッシュ（パス検索を1回だけ行う）
 _FONT_PATH_CACHE: str | None = None
 
@@ -4260,7 +4177,6 @@ def _find_font_path() -> str | None:
 
     import subprocess as _sp
 
-    # 優先: Macのヒラギノ明朝（見た目が最良）
     mac_candidates = [
         "/System/Library/Fonts/ヒラギノ明朝 ProN.ttc",
         "/System/Library/Fonts/ヒラギノ明朝 ProN W3.otf",
@@ -4328,13 +4244,13 @@ async def _groq_generate_sakubun(theme: str, length: int, guild_id: int = None) 
     api_key = get_groq_api_key(guild_id)
     if not api_key: return ""
     prompt = (
-        f"あなたは小学生です。\n"
+        f"あなたは中学生です。\n"
         f"テーマ「{theme}」について、{length}文字程度の作文を書いてください。\n\n"
         "【絶対ルール】\n"
         "1. タイトル、氏名、挨拶などは一切書かないでください。\n"
         "2. 本文のみを純粋なテキストで出力してください。\n"
         "3. 改行や段落分けを適度に行ってください。\n"
-        "4. 自然な日本語（小学生〜中学生らしい文体）で書いてください。"
+        "4. 自然な日本語（中学~高校生らしい文体）で書いてください。"
     )
     try:
         async with aiohttp.ClientSession() as session:
@@ -4503,6 +4419,10 @@ def _split_vertical_tokens(text: str) -> list:
         tokens.extend(list(text[last:]))
     return tokens
 
+
+# ──────────────────────────────────────────────
+# 川柳画像生成（/secret の senryu イベントが使用）
+# ──────────────────────────────────────────────
 def build_haiku_image(parts: list[str], emoji_images: dict = None) -> Image.Image:
     """
     縦書き・和紙風俳句カード。W=380 H=560 固定。
@@ -4586,232 +4506,6 @@ def build_haiku_image(parts: list[str], emoji_images: dict = None) -> Image.Imag
             y += char_h
 
     return img
-
-
-# ── 川柳検出の前処理フィルタ ──────────────────
-# メンション・チャンネル/ロールリンク・カスタム絵文字・URLが含まれるメッセージは、
-# 誤爆やping事故を避けるため検出対象から除外する。
-_DISCORD_TOKEN_RE = re.compile(r"<@!?\d+>|<#\d+>|<@&\d+>|<a?:\w+:\d+>|https?://\S+")
-_FENCED_CODE_RE    = re.compile(r"```.*?```", re.S)
-_INLINE_CODE_RE    = re.compile(r"`[^`]+`")
-_SPOILER_RE        = re.compile(r"\|\|.+?\|\|", re.S)
-
-def _strip_code_blocks(s: str) -> str:
-    s = _FENCED_CODE_RE.sub(" ", s)
-    s = _INLINE_CODE_RE.sub(" ", s)
-    return s
-
-def _contains_spoiler(s: str) -> bool:
-    return bool(_SPOILER_RE.search(s))
-
-def _strip_spoiler_markers(s: str) -> str:
-    return s.replace("||", "")
-
-def _is_japanese_rich(s: str, threshold: float = 0.5) -> bool:
-    """空白を除いた文字のうち、日本語の文字が占める割合が閾値以上かを見る（雑音の多い文章を早期に除外）"""
-    total = jp = 0
-    for ch in s:
-        if ch.isspace():
-            continue
-        total += 1
-        if ("\u3040" <= ch <= "\u30ff") or ("\u4e00" <= ch <= "\u9fff") or ch in "ー・":
-            jp += 1
-    if total == 0:
-        return False
-    return (jp / total) >= threshold
-
-HAIKU_MAX_LEN = 300   # GROQでの読み変換に投げるメッセージ長の上限
-
-async def _groq_tokenize_reading(text: str, guild_id: int = None) -> list[tuple[str, str]] | None:
-    """
-    GROQを使って文章を単語単位に分割し、それぞれの読み仮名（ひらがな）を取得する。
-    5-7-5かどうかの判定やモーラ計算はさせない。LLMは「形態素分割・かな変換」だけを担当し、
-    音数の厳密な計算はローカルの決定的ロジック（count_mora）で行う方が精度が高いため。
-    """
-    api_key = get_groq_api_key(guild_id)
-    if not api_key:
-        return None
-    try:
-        prompt = (
-            "あなたは日本語の形態素解析器です。\n"
-            "次の【文章】を意味の通じる最小単位（単語）に分割し、それぞれの読み仮名（ひらがな）を付けてください。\n"
-            f"【文章】: 「{text}」\n\n"
-            "【絶対ルール】\n"
-            "- 各単位を出現順につなげると【文章】と一字一句完全に一致すること（省略・追加・変更・並び替えは絶対禁止）。\n"
-            "- 空白・改行・句読点・記号・絵文字・数字・英字なども、それぞれ1つの単位として含めること。\n"
-            "- 読み仮名は、単位がひらがな・カタカナ・記号・数字・英字の場合はそのまま書き、漢字を含む場合はその文脈での読みをひらがなで書くこと。\n"
-            "- 五七五のリズムなどは一切考えなくてよい。正確に分割して読みを付けるだけでよい。\n\n"
-            "以下の形式だけで答えてください（説明や前置きは不要）:\n"
-            "単語1/よみ1|単語2/よみ2|単語3/よみ3| ...\n\n"
-            "例: 「古池や蛙飛び込む水の音だ」→ 古池/ふるいけ|や/や|蛙/かえる|飛び込む/とびこむ|水/みず|の/の|音/おと|だ/だ"
-        )
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}",
-                         "Content-Type": "application/json"},
-                json={
-                    "model": "openai/gpt-oss-120b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 700,
-                    "temperature": 0.0,
-                },
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data   = await resp.json()
-                result = data["choices"][0]["message"]["content"].strip()
-                tokens: list[tuple[str, str]] = []
-                for piece in result.split("|"):
-                    piece = piece.strip()
-                    if not piece or "/" not in piece:
-                        continue
-                    word, yomi = piece.rsplit("/", 1)
-                    tokens.append((word, yomi.strip()))
-                if not tokens:
-                    return None
-                # 創作防止: 単語を出現順に連結すると元の文章と完全一致するか検証
-                joined = "".join(w for w, _ in tokens)
-                if joined != text:
-                    return None
-                return tokens
-    except Exception:
-        return None
-
-def _find_senryu_from_tokens(tokens: list[tuple[str, str]]) -> list[str] | None:
-    """
-    単語単位の読み仮名からモーラ数を積算し、5-7-5 または 5-5-7 に区切れる範囲を
-    トークン境界で探索する（文字単位の探索より言語的に正確）。
-    開始位置もスライドさせることで、長い文章に埋め込まれた川柳も検出できる。
-    ±1モーラ（字余り・字足らず）まで許容するが、複数の候補が見つかった場合は
-    目標モーラ数からのズレ（誤差）が最小の候補を採用する。
-    見つかった時点で誤差0（完全な5-7-5/5-5-7）の候補があれば即座にそれを採用する
-    （そうしないと、たまたま近い近似一致を先に拾ってしまい、
-    本来メッセージ中に存在する完全な5-7-5を見逃すことがあるため）。
-    """
-    TOL = 1
-    moras = [count_mora(y) for _, y in tokens]
-    n = len(tokens)
-    targets_list = [(5, 7, 5), (5, 5, 7)]
-    best_parts, best_dev = None, None
-    for s in range(n):
-        acc1 = 0
-        i = s
-        while i < n:
-            acc1 += moras[i]
-            i += 1
-            if acc1 > 5 + TOL:
-                break
-            if 5 - TOL <= acc1 <= 5 + TOL:
-                for p1, p2, p3 in targets_list:
-                    acc2 = 0
-                    j = i
-                    while j < n:
-                        acc2 += moras[j]
-                        j += 1
-                        if acc2 > p2 + TOL:
-                            break
-                        if p2 - TOL <= acc2 <= p2 + TOL:
-                            acc3 = 0
-                            k = j
-                            while k < n:
-                                acc3 += moras[k]
-                                k += 1
-                                if acc3 > p3 + TOL:
-                                    break
-                                if p3 - TOL <= acc3 <= p3 + TOL:
-                                    total_dev = abs(acc1 - p1) + abs(acc2 - p2) + abs(acc3 - p3)
-                                    # 誤差が同点の場合は「ズレている句の数」が少ない方（＝字余り・字足らずが
-                                    # 1箇所に集中している方）を自然な区切りとして優先する
-                                    n_off = (acc1 != p1) + (acc2 != p2) + (acc3 != p3)
-                                    dev = (total_dev, n_off)
-                                    if best_dev is not None and dev >= best_dev:
-                                        continue
-                                    phrase1 = "".join(w for w, _ in tokens[s:i]).strip()
-                                    phrase2 = "".join(w for w, _ in tokens[i:j]).strip()
-                                    phrase3 = "".join(w for w, _ in tokens[j:k]).strip()
-                                    if not (phrase1 and phrase2 and phrase3):
-                                        continue
-                                    best_parts, best_dev = [phrase1, phrase2, phrase3], dev
-                                    if total_dev == 0:
-                                        return best_parts
-    return best_parts
-
-# 川柳重複検知防止: 処理中のメッセージIDを記録
-_haiku_processing: set[int] = set()
-
-async def check_haiku(message: discord.Message):
-    raw = message.content
-    stripped_raw = raw.strip() if raw else ""
-    if not stripped_raw or len(stripped_raw) < 5:
-        return
-    if stripped_raw.startswith("http") or stripped_raw.startswith("/"):
-        return
-    if _DISCORD_TOKEN_RE.search(raw):
-        return
-    # 同一メッセージに二重処理しない
-    if message.id in _haiku_processing:
-        return
-    _haiku_processing.add(message.id)
-    try:
-        has_spoiler = _contains_spoiler(raw)
-        text = _strip_spoiler_markers(raw) if has_spoiler else raw
-        text = _strip_code_blocks(text).strip()
-        if not text or len(text) < 5 or len(text) > HAIKU_MAX_LEN:
-            return
-        if not _is_japanese_rich(text):
-            return
-
-        parts = None
-        guild_id = message.guild.id if message.guild else None
-        api_key = get_groq_api_key(guild_id)
-        if api_key:
-            # GROQには単語分割＋読み変換だけを依頼し、5-7-5判定はローカルで厳密に行う
-            tokens = await _groq_tokenize_reading(text, guild_id)
-            if tokens:
-                parts = _find_senryu_from_tokens(tokens)
-        if parts is None:
-            # GROQが使えない/失敗した場合はローカル検出にフォールバック
-            parts = split_into_phrases(text)
-        if parts:
-            emoji_images = await _fetch_emoji_images("".join(parts), guild=message.guild)
-            img = build_haiku_image(parts, emoji_images=emoji_images)
-            buf = BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-            filename = "SPOILER_senryu.png" if has_spoiler else "senryu.png"
-            await message.channel.send(
-                "川柳を検出しました！",
-                file=discord.File(buf, filename),
-                reference=message,
-            )
-    finally:
-        _haiku_processing.discard(message.id)
-
-@bot.tree.command(name="haiku", description="川柳検出機能のON/OFFを切り替えます")
-@app_commands.describe(scope="channel=このチャンネルのみ / server=サーバー全体", state="ON / OFF", channel="対象チャンネル（省略=実行チャンネル）")
-async def cmd_haiku(interaction: discord.Interaction, scope: str = "channel", state: str = "ON", channel: discord.TextChannel = None):
-    await safe_defer(interaction, ephemeral=True)
-    if not interaction.user.guild_permissions.manage_channels:
-        await interaction.followup.send("チャンネル管理権限が必要です。", ephemeral=True)
-        return
-    gd = db_read("haiku", guild_id=interaction.guild_id)
-    on = state.upper() == "ON"
-    if scope == "server":
-        gd["server"] = on
-        msg = f"サーバー全体の川柳検出を {'ON' if on else 'OFF'} にしました。"
-    else:
-        target = channel or interaction.channel
-        chs = gd.get("channels", [])
-        if on and target.id not in chs:
-            chs.append(target.id)
-        elif not on and target.id in chs:
-            chs.remove(target.id)
-        gd["channels"] = chs
-        msg = f"{target.mention} の川柳検出を {'ON' if on else 'OFF'} にしました。"
-    db_write("haiku", gd, guild_id=interaction.guild_id)
-    await interaction.followup.send(msg, ephemeral=True)
 
 
 # ──────────────────────────────────────────────
@@ -6083,6 +5777,386 @@ def _wrap_text(text: str, font, max_width: int) -> list[str]:
     return lines_out
 
 # ──────────────────────────────────────────────
+# /suggest（会話の流れを読んでAIが次の返信案を考える）
+# ──────────────────────────────────────────────
+@bot.tree.command(name="suggest", description="直近の会話の流れをAIが読んで、話題の整理と次の返信案を出します")
+@app_commands.describe(count="さかのぼって読む直近メッセージ数（既定20、5〜80）")
+async def cmd_suggest(interaction: discord.Interaction, count: app_commands.Range[int, 5, 80] = 20):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.guild:
+        await interaction.followup.send("サーバー内でのみ使用できます。", ephemeral=True); return
+
+    api_key = get_groq_api_key(interaction.guild_id)
+    if not api_key:
+        await interaction.followup.send("この機能を使うにはGroq APIキーが必要です。`/apikey` で設定してください。", ephemeral=True); return
+
+    try:
+        history = [m async for m in interaction.channel.history(limit=count)]
+    except Exception as e:
+        await interaction.followup.send(f"このチャンネルの履歴を読み取れませんでした: {e}", ephemeral=True); return
+
+    history.reverse()
+    lines = []
+    participant_counts: dict[str, int] = {}
+    for m in history:
+        # 他Botの発言はノイズになりやすいため除外（なりすまし等のWebhook経由の発言は会話の一部として含める）
+        if m.author.bot and m.webhook_id is None:
+            continue
+        content = (m.content or "").strip()
+        if not content or content.startswith("/"):
+            continue
+        name = m.author.display_name
+        participant_counts[name] = participant_counts.get(name, 0) + 1
+        lines.append(f"{name}: {content}"[:300])
+
+    if len(lines) < 2:
+        await interaction.followup.send("参考にできる会話がこのチャンネルに見つかりませんでした。", ephemeral=True); return
+
+    convo_text = "\n".join(lines[-150:])  # 文字数の暴走を防ぐため直近分に絞る
+
+    system_p = (
+        "あなたはDiscordの会話ログを読んで、状況を整理したり次の返信を考えたりするアシスタントです。\n"
+        "話題・雰囲気・口調（タメ口か敬語か等）・誰が会話を主導しているかを会話ログから読み取ってください。\n"
+        "出力はJSON形式のみ。前置き・説明・```は不要です。"
+    )
+    user_p = (
+        f"以下は直近の会話ログです。これを読んで、{interaction.user.display_name} さんの参考になるよう次の4点をまとめてください。\n"
+        "1. topic: 今の話題・流れを2〜3文程度で要約\n"
+        "2. key_members: 会話を中心的に動かしている人（発言数が多い・話題を提起している等）を、理由も添えて最大4人まで\n"
+        "3. key_points: 押さえておくべき要点・決まったこと・気になる発言などを箇条書きで最大5個まで\n"
+        f"4. suggestions: {interaction.user.display_name} さんが次に送るメッセージとして自然な返信案を3つ。"
+        "内容や言い方にバリエーションを持たせ、そのまま送信できる文面のみとし、番号や絵文字の装飾は付けないでください。\n\n"
+        f"【会話ログ】\n{convo_text}\n\n"
+        "【出力形式】（この形式のJSONのみ。無ければ空配列や空文字でよい）\n"
+        '{"topic": "...", '
+        '"key_members": [{"name": "...", "reason": "..."}], '
+        '"key_points": ["...", "..."], '
+        '"suggestions": ["案1の文面", "案2の文面", "案3の文面"]}'
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "openai/gpt-oss-120b",
+                    "messages": [
+                        {"role": "system", "content": system_p},
+                        {"role": "user", "content": user_p},
+                    ],
+                    "max_tokens": 900,
+                    "temperature": 0.7,
+                },
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                # リソース表示用にレートリミットを保存
+                bot._groq_ratelimit = {
+                    "req_rem": resp.headers.get("x-ratelimit-remaining-requests", "N/A"),
+                    "req_lim": resp.headers.get("x-ratelimit-limit-requests", "N/A"),
+                    "tok_rem": resp.headers.get("x-ratelimit-remaining-tokens", "N/A"),
+                    "tok_lim": resp.headers.get("x-ratelimit-limit-tokens", "N/A"),
+                }
+                if resp.status != 200:
+                    await interaction.followup.send(f"AIからの応答取得に失敗しました（status={resp.status}）。", ephemeral=True); return
+                data = await resp.json()
+                raw = data["choices"][0]["message"]["content"].strip()
+                raw_clean = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+                raw_clean = re.sub(r"```\s*$", "", raw_clean, flags=re.MULTILINE).strip()
+                try:
+                    parsed = json.loads(raw_clean)
+                except Exception:
+                    parsed = {}
+    except asyncio.TimeoutError:
+        await interaction.followup.send("AIの応答がタイムアウトしました。", ephemeral=True); return
+    except Exception as e:
+        await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True); return
+
+    topic = str(parsed.get("topic") or "").strip()
+    key_members = parsed.get("key_members") or []
+    key_points = [str(p).strip() for p in (parsed.get("key_points") or []) if str(p).strip()]
+    suggestions = [str(s).strip() for s in (parsed.get("suggestions") or []) if str(s).strip()]
+
+    if not topic and not key_members and not key_points and not suggestions:
+        await interaction.followup.send("うまく整理できませんでした。もう一度お試しください。", ephemeral=True); return
+
+    embed = discord.Embed(
+        title="💬 会話の整理と次の返信案",
+        description=f"直近{len(lines)}件の会話を参考にしました（あなたにだけ表示されています）",
+        color=0x5865F2,
+    )
+    if topic:
+        embed.add_field(name="🗒 今の話題", value=topic[:1000], inline=False)
+    if key_members:
+        member_lines = []
+        for km in key_members[:4]:
+            if isinstance(km, dict):
+                nm = str(km.get("name", "")).strip()
+                rs = str(km.get("reason", "")).strip()
+            else:
+                nm, rs = str(km).strip(), ""
+            if not nm:
+                continue
+            member_lines.append(f"- **{nm}**" + (f"：{rs}" if rs else ""))
+        if member_lines:
+            embed.add_field(name="👥 中心メンバー", value="\n".join(member_lines)[:1000], inline=False)
+    if key_points:
+        embed.add_field(name="📌 要点", value="\n".join(f"- {p}" for p in key_points[:5])[:1000], inline=False)
+    for i, s in enumerate(suggestions[:3], start=1):
+        embed.add_field(name=f"返信案{i}", value=s[:1000], inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ──────────────────────────────────────────────
+# /temprole（メンション用の一時的なロール）
+# ──────────────────────────────────────────────
+TEMPROLE_MAX_PER_GUILD = 5
+TEMPROLE_MIN_DAYS = 1
+TEMPROLE_MAX_DAYS = 7
+TEMPROLE_CREATE_COOLDOWN_SEC = 10.0  # 連続作成によるスパム防止
+TEMPROLE_DEFAULT_EMOJI = "🔔"         # 自動設置されるロールパネルで使う絵文字
+
+def _temprole_is_enabled(guild_id: int) -> bool:
+    """一時ロール機能（/temprole の create）がこのサーバーで有効かどうか。既定はOFF。"""
+    settings = db_read("temprole_settings", guild_id=guild_id)
+    if not isinstance(settings, dict):
+        return False
+    return bool(settings.get("enabled", False))
+
+async def _post_temprole_panel(channel, guild: discord.Guild, role: discord.Role, creator: discord.Member):
+    """一時ロール用の簡易ロールパネル（絵文字1つでそのロールを自己付与/解除できるもの）をチャンネルに投稿する。
+    タイトルと色はロールと同じ、サブタイトルは作成者の記載にする。"""
+    mapping = {TEMPROLE_DEFAULT_EMOJI: role.id}
+    subtitle = f"{creator.mention} によって作成された"
+    color_val = role.colour.value
+    embed = _build_rolepanel_embed(guild, role.name, mapping, None, subtitle=subtitle, color=color_val)
+    msg = await channel.send(embed=embed)
+    db_write("reaction_roles", {
+        "guild_id": guild.id, "channel_id": channel.id, "title": role.name,
+        "subtitle": subtitle, "color": color_val,
+        "roles": mapping, "password": None,
+    }, shared=str(msg.id))
+    failed = await _add_rolepanel_reactions(msg, mapping)
+    return msg, failed
+
+def _parse_temprole_color(raw: str | None):
+    """16進数カラーコード文字列（#付き/無し、6桁）をdiscord.Colourへ変換する。未指定ならデフォルト色。"""
+    if not raw or not raw.strip():
+        return discord.Colour.default()
+    s = raw.strip().lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", s):
+        return None
+    return discord.Colour(int(s, 16))
+
+async def _reconcile_temproles(guild: discord.Guild, data: dict) -> tuple[dict, bool]:
+    """一時ロールの記録を整理する：
+    - ロール自体がサーバーから既に無くなっている（手動削除等） → 記録だけ削除
+    - 有効期限が過ぎている → Discord側のロールも削除した上で記録を削除
+    戻り値は (整理後のdata, 変更があったか)。"""
+    if not isinstance(data, dict):
+        return {}, True
+    now = time.time()
+    changed = False
+    for role_id_str in list(data.keys()):
+        entry = data[role_id_str]
+        if not isinstance(entry, dict) or not role_id_str.isdigit():
+            data.pop(role_id_str, None); changed = True
+            continue
+        role = guild.get_role(int(role_id_str))
+        if role is None:
+            data.pop(role_id_str, None); changed = True
+            continue
+        if now >= entry.get("expires_at", 0):
+            try:
+                await role.delete(reason="一時ロールの有効期限切れ")
+            except Exception as e:
+                db_log("temprole_cleanup_delete_failed", f"guild={guild.id} role={role_id_str} | {e}", level="WARN")
+            data.pop(role_id_str, None); changed = True
+    return data, changed
+
+@tasks.loop(minutes=15)
+async def task_cleanup_temproles():
+    """期限切れの一時ロールを定期的に自動削除する"""
+    try:
+        db_dir_abs = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_DIR)
+        folder = os.path.join(db_dir_abs, "temprole")
+        if not os.path.isdir(folder):
+            return
+        for fname in os.listdir(folder):
+            if not fname.endswith(".json"):
+                continue
+            gid_str = fname[:-len(".json")]
+            if not gid_str.isdigit():
+                continue
+            guild = bot.get_guild(int(gid_str))
+            if guild is None:
+                continue
+            data = db_read("temprole", guild_id=guild.id)
+            if not isinstance(data, dict) or not data:
+                continue
+            data, changed = await _reconcile_temproles(guild, data)
+            if changed:
+                db_write("temprole", data, guild_id=guild.id)
+    except Exception as e:
+        db_log("temprole_cleanup_failed", str(e), level="WARN")
+
+@bot.tree.command(name="temprole", description="メンション用の一時的なロールを作成・削除・一覧表示します（有効期限が来ると自動的に削除されます）")
+@app_commands.describe(
+    action="create（作成）/ delete（削除）/ list（一覧表示）/ panel（ロールパネルを表示）/ settings（機能のON/OFF）",
+    name="【create用】ロール名",
+    days=f"【create用】有効期限・日数（{TEMPROLE_MIN_DAYS}〜{TEMPROLE_MAX_DAYS}、必須）",
+    color="【create用】カラーコード（例: FF0000。省略可）",
+    role="【delete/panel用】対象の一時ロール",
+    state="【settings用】この機能自体をサーバーでON/OFF（既定はOFF）",
+)
+@app_commands.choices(
+    action=[
+        app_commands.Choice(name="create（作成）", value="create"),
+        app_commands.Choice(name="delete（削除）", value="delete"),
+        app_commands.Choice(name="list（一覧表示）", value="list"),
+        app_commands.Choice(name="panel（ロールパネルを表示）", value="panel"),
+        app_commands.Choice(name="settings（機能のON/OFF）", value="settings"),
+    ],
+    state=[
+        app_commands.Choice(name="ON", value="on"),
+        app_commands.Choice(name="OFF", value="off"),
+    ],
+)
+async def cmd_temprole(interaction: discord.Interaction, action: app_commands.Choice[str],
+                        name: str = None, days: app_commands.Range[int, TEMPROLE_MIN_DAYS, TEMPROLE_MAX_DAYS] = None,
+                        color: str = None, role: discord.Role = None, state: app_commands.Choice[str] = None):
+    await safe_defer(interaction, ephemeral=True)
+    if not interaction.guild:
+        await interaction.followup.send("サーバー内でのみ使用できます。", ephemeral=True); return
+    guild = interaction.guild
+    act = action.value
+
+    if act == "settings":
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.followup.send("「ロールの管理」権限を持つ人のみ、この設定を変更できます。", ephemeral=True); return
+        if state is None:
+            cur = _temprole_is_enabled(guild.id)
+            await interaction.followup.send(
+                f"現在、一時ロール機能（作成）はこのサーバーで **{'ON' if cur else 'OFF'}** です。"
+                "`state` を指定すると変更できます（例: `/temprole action:settings state:ON`）。", ephemeral=True)
+            return
+        enabled = state.value == "on"
+        db_write("temprole_settings", {"enabled": enabled}, guild_id=guild.id)
+        await interaction.followup.send(f"一時ロール機能（作成）をこのサーバーで **{'ON' if enabled else 'OFF'}** にしました。", ephemeral=True)
+        return
+
+    data = db_read("temprole", guild_id=guild.id)
+    if not isinstance(data, dict):
+        data = {}
+    data, changed = await _reconcile_temproles(guild, data)
+    if changed:
+        db_write("temprole", data, guild_id=guild.id)
+
+    if act == "list":
+        if not data:
+            await interaction.followup.send("現在、このサーバーに一時ロールはありません。", ephemeral=True); return
+        lines = []
+        for role_id_str, entry in data.items():
+            r = guild.get_role(int(role_id_str))
+            if r is None:
+                continue
+            exp = int(entry.get("expires_at", 0))
+            creator = guild.get_member(entry.get("created_by", 0))
+            creator_txt = creator.mention if creator else f"(ID:{entry.get('created_by')})"
+            lines.append(f"- {r.mention} 作成者: {creator_txt} / 期限: <t:{exp}:R>")
+        await interaction.followup.send("**現在の一時ロール:**\n" + "\n".join(lines), ephemeral=True)
+        return
+
+    if act == "create":
+        if not _temprole_is_enabled(guild.id):
+            await interaction.followup.send(
+                "この機能はこのサーバーで無効になっています。「ロールの管理」権限を持つ人が "
+                "`/temprole action:settings state:ON` で有効にできます。", ephemeral=True); return
+        if not name or not name.strip():
+            await interaction.followup.send("ロール名（`name`）を指定してください。", ephemeral=True); return
+        name = name.strip()[:100]
+        if days is None:
+            await interaction.followup.send(f"有効期限（`days`、{TEMPROLE_MIN_DAYS}〜{TEMPROLE_MAX_DAYS}日）を指定してください。", ephemeral=True); return
+        colour = _parse_temprole_color(color)
+        if colour is None:
+            await interaction.followup.send("カラーコードの形式が正しくありません（例: `FF0000` のような16進数6桁）。", ephemeral=True); return
+        if not guild.me.guild_permissions.manage_roles:
+            await interaction.followup.send("Bot に「ロールの管理」権限がないため、ロールを作成できません。", ephemeral=True); return
+        if len(data) >= TEMPROLE_MAX_PER_GUILD:
+            await interaction.followup.send(f"このサーバーでは一時ロールを同時に最大{TEMPROLE_MAX_PER_GUILD}個までしか作成できません（現在{len(data)}個）。期限切れを待つか、`/temprole action:delete` で削除してください。", ephemeral=True); return
+        if not _check_rate(f"temprole_create:{guild.id}", cooldown_sec=TEMPROLE_CREATE_COOLDOWN_SEC):
+            await interaction.followup.send("作成の間隔が短すぎます。しばらく待ってから再度お試しください。", ephemeral=True); return
+
+        try:
+            new_role = await guild.create_role(
+                name=name,
+                colour=colour,
+                permissions=discord.Permissions.none(),  # 最低権限（メンション以外の効果を持たせない）
+                mentionable=True,
+                reason=f"一時ロール作成 by {interaction.user} ({interaction.user.id})",
+            )
+        except Exception as e:
+            await interaction.followup.send(f"ロールの作成に失敗しました: {e}", ephemeral=True); return
+
+        now = time.time()
+        expires_at = now + days * 86400
+        data[str(new_role.id)] = {
+            "name": name,
+            "created_by": interaction.user.id,
+            "created_at": now,
+            "expires_at": expires_at,
+        }
+        db_write("temprole", data, guild_id=guild.id)
+
+        panel_note = f"このチャンネルにロールパネルを設置しました（{TEMPROLE_DEFAULT_EMOJI} でロールの付与/解除ができます）。"
+        try:
+            await _post_temprole_panel(interaction.channel, guild, new_role, interaction.user)
+        except Exception as e:
+            db_log("temprole_panel_post_failed", f"guild={guild.id} role={new_role.id} | {e}", level="WARN")
+            panel_note = f"（ロールパネルの自動投稿には失敗しました。`/temprole action:panel role:{new_role.name}` で後から表示できます）"
+
+        await interaction.followup.send(
+            f"一時ロール {new_role.mention} を作成しました。\n"
+            f"有効期限: <t:{int(expires_at)}:F>（<t:{int(expires_at)}:R>）\n"
+            f"メンション可能・権限無しのロールです。{panel_note}\n"
+            f"`/temprole action:delete role:{new_role.name}` でいつでも早期削除できます。",
+            ephemeral=True,
+        )
+        return
+
+    if act == "delete":
+        if role is None:
+            await interaction.followup.send("削除するロール（`role`）を指定してください。", ephemeral=True); return
+        entry = data.get(str(role.id))
+        if entry is None:
+            await interaction.followup.send("そのロールは、このBotが作成した一時ロールとして登録されていません。", ephemeral=True); return
+        is_creator = interaction.user.id == entry.get("created_by")
+        is_admin = interaction.user.guild_permissions.manage_roles or interaction.user.guild_permissions.administrator
+        if not (is_creator or is_admin):
+            await interaction.followup.send("このロールの作成者か、「ロールの管理」権限を持つ人のみ削除できます。", ephemeral=True); return
+        try:
+            await role.delete(reason=f"一時ロール早期削除 by {interaction.user} ({interaction.user.id})")
+        except Exception as e:
+            await interaction.followup.send(f"ロールの削除に失敗しました: {e}", ephemeral=True); return
+        data.pop(str(role.id), None)
+        db_write("temprole", data, guild_id=guild.id)
+        await interaction.followup.send(f"一時ロール「{entry.get('name')}」を削除しました。", ephemeral=True)
+        return
+
+    if act == "panel":
+        if role is None:
+            await interaction.followup.send("パネルを表示するロール（`role`）を指定してください。", ephemeral=True); return
+        entry = data.get(str(role.id))
+        if entry is None:
+            await interaction.followup.send("そのロールは、このBotが作成した一時ロールとして登録されていません。", ephemeral=True); return
+        creator = guild.get_member(entry.get("created_by")) or interaction.user
+        try:
+            _msg, failed = await _post_temprole_panel(interaction.channel, guild, role, creator)
+        except Exception as e:
+            await interaction.followup.send(f"パネルの投稿に失敗しました: {e}", ephemeral=True); return
+        await interaction.followup.send("このチャンネルにロールパネルを表示しました。" + _rolepanel_failed_warning(failed), ephemeral=True)
+        return
+
+# ──────────────────────────────────────────────
 # /purge
 # ──────────────────────────────────────────────
 @bot.tree.command(name="purge", description="直近N件のメッセージを削除します（最大100件）")
@@ -6547,7 +6621,7 @@ async def cmd_impersonateset(interaction: discord.Interaction,
     await interaction.followup.send(msg, ephemeral=True)
 
 # ──────────────────────────────────────────────
-# 21.6 /secret 【使用注意！！】何が起こるかわかりません
+# 21.5 /secret 【使用注意！！】何が起こるかわかりません
 # 身内鯖以外での使用は推奨しません。
 # ──────────────────────────────────────────────
 SECRET_WARNING = "【使用注意！！】このコマンドは何が起こるかわかりません！身内鯖以外での使用は推奨しません。"
@@ -6559,7 +6633,7 @@ SECRET_OBAMA_FALLBACK = ["おばまです", "オバマなのだ…", "…オバ�
 SECRET_NICKNAMES = [
     "ちんちくりん", "変態さん", "おばかさん", "むしさん", "ぷにぷに星人",
     "ぺろぺろキャンディ", "ぶーぶー豚さん", "みそしるおばけ", "でろでろスライム",
-    "名無しの権兵衛", "自称天才", "おこちゃま", "貧乳ちゃん", "ぽんこつロボ", "やじゅ", "先輩",
+    "名無しの権兵衛", "自称天才", "おこちゃま", "貧弱ちゃん", "ぽんこつロボ",
 ]
 
 SECRET_CONFESS_TEMPLATES = [
@@ -6619,7 +6693,6 @@ SECRET_SENRYU_FALLBACK_PARTS = [
     ["夕焼けに", "溶けてゆく日々", "惜しみけり"],
     ["風薫る", "五月の空に", "夢のせて"],
     ["満員の", "電車の中で", "夢を見る"],
-    ["しきみたり", "はなぴしこうく", "ばかぴいし"],
 ]
 
 async def _groq_generate_senryu_parts(guild_id: int = None) -> list[str]:
@@ -7014,7 +7087,7 @@ async def _chat_loop(channel_id: int):
         wait_seconds = random.uniform(interval_min * 60.0, interval_max * 60.0)
         await asyncio.sleep(wait_seconds)
 
-@bot.tree.command(name="apikey", description="サーバー独自のGroq APIキーを設定します（管理者専用・川柳/AIチャット等すべてのAI機能に適用されます）")
+@bot.tree.command(name="apikey", description="サーバー独自のGroq APIキーを設定します（管理者専用・AIチャット等すべてのAI機能に適用されます）")
 @app_commands.describe(api_key="設定するGroq APIキー（空の場合は削除）")
 @app_commands.default_permissions(manage_guild=True)
 async def cmd_apikey(interaction: discord.Interaction, api_key: str = None):
@@ -7030,7 +7103,7 @@ async def cmd_apikey(interaction: discord.Interaction, api_key: str = None):
     if api_key:
         settings["custom_api_key"] = api_key
         db_write("aichat_settings", settings, guild_id=gid)
-        await interaction.followup.send("サーバー独自のAPIキーを保存しました。このサーバーのAI機能（川柳検出・ローマ字翻訳・meigen・sakubun・AIチャット等）すべてに適用されます。", ephemeral=True)
+        await interaction.followup.send("サーバー独自のAPIキーを保存しました。このサーバーのAI機能（ローマ字翻訳・meigen・sakubun・AIチャット等）すべてに適用されます。", ephemeral=True)
     else:
         if "custom_api_key" in settings:
             del settings["custom_api_key"]
